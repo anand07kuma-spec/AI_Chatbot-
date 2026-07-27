@@ -41,10 +41,9 @@ cd AI_Chatbot
 pip install -r requirements.txt
 streamlit run app.py
 ```
-
 ## 📸 Screenshot
 
-(Add your chatbot screenshot here after uploading to GitHub.)
+![AI Chatbot](screenshot.png)
 
 ## 👨‍💻 Author
 
