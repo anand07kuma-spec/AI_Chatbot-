@@ -1,4 +1,5 @@
 import os
+import time
 from dotenv import load_dotenv
 from google import genai
 
@@ -9,11 +10,20 @@ client = genai.Client(
 )
 
 def get_response(user_input):
-    try:
-        response = client.models.generate_content(
-            model="gemini-3.6-flash",
-            contents=user_input
-        )
-        return response.text
-    except Exception as e:
-        return f"Error: {e}"
+    for attempt in range(3):
+        try:
+            response = client.models.generate_content(
+                model="gemini-2.5-flash",
+                contents=user_input
+            )
+            return response.text
+
+        except Exception as e:
+            if "503" in str(e) and attempt < 2:
+                time.sleep(2)
+                continue
+
+            if "503" in str(e):
+                return "⚠️ AI server is busy. Please try again in a few seconds."
+
+            return f"Error: {e}"
