@@ -1,111 +1,135 @@
-
 import os
-
+import httpx
 from dotenv import load_dotenv
-from google import genai
-from google.genai import types
 
 load_dotenv()
 
-# Read API key from environment or Streamlit Cloud Secrets
-api_key = os.getenv("GEMINI_API_KEY")
+GROQ_API_URL = "https://api.groq.com/openai/v1/chat/completions"
+DEFAULT_MODEL = "openai/gpt-oss-120b"
+REQUEST_TIMEOUT = 60.0
 
-if not api_key:
-    try:
-        import streamlit as st
-        api_key = st.secrets.get("GEMINI_API_KEY")
-    except Exception:
-        api_key = None
 
-if not api_key:
-    raise ValueError(
-        "GEMINI_API_KEY is missing. Add it to your .env file "
-        "or Streamlit Cloud Secrets."
+def get_api_key():
+    api_key = os.getenv("GROQ_API_KEY")
+
+    if api_key:
+        return api_key.strip()
+
+    return None
+
+
+def get_response(messages):
+    """Send chat history to Groq and return {"ok": bool, "reply": str}."""
+
+    if not isinstance(messages, list) or not messages:
+        return {"ok": False, "reply": "Please enter a message."}
+
+    api_key = get_api_key()
+
+    if not api_key:
+        return {
+            "ok": False,
+            "reply": "API key is missing. Add GROQ_API_KEY to your .env file "
+                     "(locally) or to Render Environment Variables.",
+        }
+
+    model = os.getenv("GROQ_MODEL", DEFAULT_MODEL).strip() or DEFAULT_MODEL
+
+    system_prompt = (
+        "You are NOVA AI, a friendly and helpful assistant. "
+        "Reply in plain, readable text. Do not use LaTeX or math markup, "
+        "and keep markdown simple (no code-heavy answers unless asked). "
+        "Be concise and conversational."
     )
 
-# Gemini client with a 20-second HTTP timeout
-client = genai.Client(
-    api_key=api_key,
-    http_options=types.HttpOptions(timeout=20000)
-)
+    payload = {
+        "model": model,
+        "messages": [{"role": "system", "content": system_prompt}] + messages,
+        "max_tokens": 2048,
+        "stream": False,
+    }
 
-# Use one model to avoid waiting for model fallback
-MODEL = "gemini-3.5-flash"
+    headers = {
+        "Authorization": f"Bearer {api_key}",
+        "Content-Type": "application/json",
+    }
 
-
-def get_response(user_input):
-    """Generate a response from Gemini."""
-
-    if not user_input or not user_input.strip():
-        return "Please enter a question."
-    
-    
     try:
-        response = client.models.generate_content(
-            model=MODEL,
-            contents=(
-                "Answer the user's question in clear, simple English. "
-                "Give a complete and useful explanation. "
-                "For educational questions, include a definition, "
-                "a simple example, and important points when relevant. "
-                "For coding questions, provide complete working code "
-                "and briefly explain it. Do not stop mid-sentence.\n\n"
-                f"User question: {user_input.strip()}"
-            ),
-            config=types.GenerateContentConfig(
-                max_output_tokens=2048,
-                temperature=0.7
-            )
+        response = httpx.post(
+            GROQ_API_URL,
+            json=payload,
+            headers=headers,
+            timeout=REQUEST_TIMEOUT,
         )
 
-        answer = response.text
+        if response.status_code == 429:
+            return {
+                "ok": False,
+                "reply": "Groq rate limit reached. Please wait a moment and try again.",
+            }
+
+        if response.status_code in (401, 403):
+            try:
+                detail = response.json()
+                message = str(detail.get("error", {}) or "")
+            except Exception:
+                message = ""
+
+            if "credit" in message.lower() or "license" in message.lower():
+                return {
+                    "ok": False,
+                    "reply": "Your Groq account has no credits left. "
+                             "Check console.groq.com, then try again.",
+                }
+
+            return {
+                "ok": False,
+                "reply": "The Groq API key was rejected. Check your GROQ_API_KEY configuration.",
+            }
+
+        if response.status_code == 404:
+            return {
+                "ok": False,
+                "reply": f"The model '{model}' was not found. Check GROQ_MODEL in your environment.",
+            }
+
+        if response.status_code >= 500:
+            return {
+                "ok": False,
+                "reply": "Groq service is temporarily unavailable. Please try again in a moment.",
+            }
+
+        if response.status_code != 200:
+            try:
+                detail = response.json()
+                message = str(detail.get("error", {}).get("message", ""))[:200]
+            except Exception:
+                message = ""
+            return {
+                "ok": False,
+                "reply": f"Groq API error ({response.status_code}): {message}",
+            }
+
+        data = response.json()
+        answer = (
+            data.get("choices", [{}])[0]
+            .get("message", {})
+            .get("content", "")
+        )
 
         if answer and answer.strip():
-            return answer.strip()
+            return {"ok": True, "reply": answer.strip()}
 
-        return "AI returned an empty response. Please try again."
+        return {"ok": False, "reply": "I couldn't generate a response. Please try again."}
 
-
-  
-
-    except Exception as e:
-        error = str(e)
-        error_upper = error.upper()
-
-        if "429" in error_upper or "RESOURCE_EXHAUSTED" in error_upper:
-            return (
-                "Gemini API limit reached. "
-                "Please try again later or check your API quota."
-            )
-
-        if (
-            "504" in error_upper
-            or "DEADLINE_EXCEEDED" in error_upper
-            or "TIMEOUT" in error_upper
-            or "TIMED OUT" in error_upper
-        ):
-            return (
-                "Gemini is taking too long to respond. "
-                "Please try again."
-            )
-
-        if (
-            "503" in error_upper
-            or "UNAVAILABLE" in error_upper
-        ):
-            return (
-                "Gemini is temporarily busy. "
-                "Please try again in a few seconds."
-            )
-
-        if (
-            "404" in error_upper
-            or "NOT_FOUND" in error_upper
-            or "NOT SUPPORTED" in error_upper
-        ):
-            return (
-                f"Model '{MODEL}' is unavailable for your API key. "
-                "Please select a model supported by your Gemini API."
-            )
-
-        return f"Gemini API error: {error[:300]}"
+    except httpx.TimeoutException:
+        return {
+            "ok": False,
+            "reply": "The request took too long. Please try again.",
+        }
+    except Exception as error:
+        print(f"Groq API error: {error}")
+        return {
+            "ok": False,
+            "reply": "Something went wrong while contacting Groq. Please try again.",
+        }
