@@ -1,7 +1,8 @@
 
 import streamlit as st
+import json
+from datetime import datetime
 from chatbot import get_response
-
 
 st.set_page_config(
     page_title="AI Chatbot",
@@ -9,124 +10,238 @@ st.set_page_config(
     layout="wide"
 )
 
+# ---------- SESSION STATE ----------
+if "conversations" not in st.session_state:
+    st.session_state.conversations = [
+        {
+            "id": 1,
+            "title": "New Chat",
+            "messages": []
+        }
+    ]
+    st.session_state.active_chat_id = 1
+    st.session_state.next_chat_id = 2
 
-# Session State
-if "messages" not in st.session_state:
-    st.session_state.messages = []
+if "pending_prompt" not in st.session_state:
+    st.session_state.pending_prompt = None
 
 
-# Sidebar
+def get_active_chat():
+    for chat in st.session_state.conversations:
+        if chat["id"] == st.session_state.active_chat_id:
+            return chat
+    return st.session_state.conversations[0]
+
+
+def create_new_chat():
+    chat_id = st.session_state.next_chat_id
+    st.session_state.next_chat_id += 1
+
+    st.session_state.conversations.insert(
+        0,
+        {
+            "id": chat_id,
+            "title": "New Chat",
+            "messages": []
+        }
+    )
+    st.session_state.active_chat_id = chat_id
+
+
+def download_chat(messages):
+    lines = []
+    for message in messages:
+        role = "You" if message["role"] == "user" else "AI"
+        lines.append(f'{role}:\n{message["content"]}\n')
+
+    return "\n".join(lines)
+
+
+# ---------- SIDEBAR ----------
 with st.sidebar:
-    st.title("🤖 AI Chatbot")
-    st.write("Built with Python + Streamlit + Gemini")
+    st.title("🤖 AI Assistant")
+    st.caption("Powered by Google Gemini")
 
-    if st.button("🗑️ Clear Chat"):
-        st.session_state.messages = []
+    if st.button("＋ New Chat", use_container_width=True):
+        create_new_chat()
         st.rerun()
 
-    st.markdown("---")
-    st.info("Type your question in the chat box below.")
+    st.divider()
+    st.subheader("💬 Your Conversations")
 
-    conversation_count = len(st.session_state.messages) // 2
-    st.metric("💬 Conversations", conversation_count)
+    for chat in st.session_state.conversations:
+        label = (
+            f'● {chat["title"]}'
+            if chat["id"] == st.session_state.active_chat_id
+            else chat["title"]
+        )
 
-    st.markdown("---")
+        if st.button(
+            label,
+            key=f'chat_{chat["id"]}',
+            use_container_width=True
+        ):
+            st.session_state.active_chat_id = chat["id"]
+            st.rerun()
 
-    chat_text = ""
+    st.divider()
 
-    for msg in st.session_state.messages:
-        role = "You" if msg["role"] == "user" else "AI"
-        chat_text += f"{role}: {msg['content']}\n\n"
+    active_chat = get_active_chat()
 
-    st.download_button(
-        label="📥 Download Chat",
-        data=chat_text,
-        file_name="chat_history.txt",
-        mime="text/plain"
+    if st.button("🗑️ Clear Current Chat", use_container_width=True):
+        active_chat["messages"] = []
+        active_chat["title"] = "New Chat"
+        st.rerun()
+
+    if active_chat["messages"]:
+        st.download_button(
+            "⬇️ Download Current Chat",
+            data=download_chat(active_chat["messages"]),
+            file_name="ai_chat.txt",
+            mime="text/plain",
+            use_container_width=True
+        )
+
+    st.caption(
+        f'Conversations: {len(st.session_state.conversations)}'
     )
 
+    st.caption("Your chats are stored in this browser session.")
 
-# Main Title
+
+# ---------- MAIN UI ----------
 st.title("🤖 AI Chatbot")
-st.markdown(
-    "### Your Personal AI Assistant powered by Google Gemini 🚀"
-)
+st.caption("Ask questions, learn new things, and explore ideas.")
 
+active_chat = get_active_chat()
+messages = active_chat["messages"]
 
-# Show Previous Chats
-for message in st.session_state.messages:
-    avatar = "👤" if message["role"] == "user" else "🤖"
+# Welcome screen and quick prompts
+if not messages:
+    st.markdown("### 👋 Hello! How can I help you today?")
+    st.write("Choose a prompt or type your own question below.")
 
-    with st.chat_message(message["role"], avatar=avatar):
+    prompts = [
+        "Explain Python in simple words",
+        "What is Artificial Intelligence?",
+        "Write a simple HTML page",
+        "Give me a fun fact"
+    ]
+
+    columns = st.columns(2)
+
+    for index, prompt_text in enumerate(prompts):
+        with columns[index % 2]:
+            if st.button(
+                prompt_text,
+                key=f"prompt_{active_chat['id']}_{index}",
+                use_container_width=True
+            ):
+                st.session_state.pending_prompt = prompt_text
+                st.rerun()
+
+# Display conversation history
+for index, message in enumerate(messages):
+    with st.chat_message(message["role"]):
         st.markdown(message["content"])
 
+        # Retry button for failed AI responses
+        if (
+            message["role"] == "assistant"
+            and message.get("is_error", False)
+            and index == len(messages) - 1
+        ):
+            if st.button(
+                "🔄 Retry",
+                key=f'retry_{active_chat["id"]}_{index}'
+            ):
+                last_prompt = message.get("prompt", "")
 
-# Welcome Screen
-if len(st.session_state.messages) == 0:
-    st.markdown("## 👋 Welcome Anand!")
-    st.write("### Your Personal AI Assistant is ready.")
-    st.info("💡 Try asking one of these questions:")
+                with st.spinner("Trying again..."):
+                    try:
+                        answer = get_response(last_prompt)
 
-    col1, col2 = st.columns(2)
+                        if not isinstance(answer, str) or not answer.strip():
+                            raise ValueError("The AI returned an empty response.")
 
-    with col1:
-        if st.button("🐍 Explain Python"):
-            st.session_state.quick_prompt = (
-                "Explain Python for beginners."
-            )
-            st.rerun()
+                        messages[index]["content"] = answer
+                        messages[index]["is_error"] = False
+                    except Exception:
+                        messages[index]["content"] = (
+                            "I couldn't get a response. Please try again "
+                            "or check your API configuration."
+                        )
+                        messages[index]["is_error"] = True
 
-        if st.button("🤖 What is AI?"):
-            st.session_state.quick_prompt = (
-                "What is Artificial Intelligence?"
-            )
-            st.rerun()
+                st.rerun()
 
-    with col2:
-        if st.button("💻 Write HTML"):
-            st.session_state.quick_prompt = (
-                "Write a simple HTML webpage."
-            )
-            st.rerun()
+# Chat input
+typed_prompt = st.chat_input("Message your AI assistant...")
 
-        if st.button("😂 Tell me a Joke"):
-            st.session_state.quick_prompt = (
-                "Tell me a funny joke."
-            )
-            st.rerun()
+prompt = typed_prompt
 
+if st.session_state.pending_prompt:
+    prompt = st.session_state.pending_prompt
+    st.session_state.pending_prompt = None
 
-# Chat Input / Quick Prompt
-prompt = st.chat_input("Ask me anything...")
+if prompt and prompt.strip():
+    prompt = prompt.strip()
 
-if "quick_prompt" in st.session_state:
-    prompt = st.session_state.pop("quick_prompt")
+    # Add the user's message
+    messages.append({
+        "role": "user",
+        "content": prompt
+    })
 
+    # Set conversation title from the first question
+    if active_chat["title"] == "New Chat":
+        active_chat["title"] = prompt[:35]
+        if len(prompt) > 35:
+            active_chat["title"] += "..."
 
-# Process user input
-if prompt:
-    st.session_state.messages.append(
-        {"role": "user", "content": prompt}
-    )
-
-    with st.chat_message("user", avatar="👤"):
+    with st.chat_message("user"):
         st.markdown(prompt)
 
-    with st.chat_message("assistant", avatar="🤖"):
-        with st.spinner("🤖 Thinking..."):
-            try:
-                reply = get_response(prompt)
-            except Exception as e:
-                reply = f"⚠️ Error: {e}"
+    # Generate the AI response
+    with st.chat_message("assistant"):
+        try:
+            with st.spinner("🤔 Thinking..."):
+                answer = get_response(prompt)
 
-            st.markdown(reply)
+            if not isinstance(answer, str) or not answer.strip():
+                raise ValueError("The AI returned an empty response.")
 
-    st.session_state.messages.append(
-        {"role": "assistant", "content": reply}
-    )
+            # Detect common error strings returned by the chatbot module
+            error_words = (
+                "error:",
+                "api error",
+                "failed to",
+                "exception:"
+            )
+            is_error = answer.strip().lower().startswith(error_words)
 
+            st.markdown(answer)
 
-st.markdown("---")
-st.caption(
-    "Made by Anand Kumar | Powered by Python + Streamlit + Gemini"
-)
+            messages.append({
+                "role": "assistant",
+                "content": answer,
+                "is_error": is_error,
+                "prompt": prompt
+            })
+
+        except Exception:
+            error_message = (
+                "Sorry, I couldn't get a response. Please check your "
+                "internet connection and API configuration, then retry."
+            )
+
+            st.error(error_message)
+
+            messages.append({
+                "role": "assistant",
+                "content": error_message,
+                "is_error": True,
+                "prompt": prompt
+            })
+
+    st.rerun()
