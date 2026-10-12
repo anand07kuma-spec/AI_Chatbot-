@@ -19,6 +19,7 @@
   const ctxMenu = document.getElementById('ctxMenu');
   const ctxDelete = document.getElementById('ctxDelete');
 
+  // ---------- Persistence ----------
   const STORE_KEY = 'astra_chats_v1';
   const MAX_TITLE = 34;
   const PLACEHOLDER = 'Message Astra AI...';
@@ -33,16 +34,15 @@
   let transcribing = false;
   let hintTimer = null;
 
-  // ---------- Persistence ----------
   function save() {
     try {
-      sessionStorage.setItem(STORE_KEY, JSON.stringify({ chats, activeId, nextId }));
+      localStorage.setItem(STORE_KEY, JSON.stringify({ chats, activeId, nextId }));
     } catch (e) { /* storage unavailable */ }
   }
 
   function load() {
     try {
-      const raw = sessionStorage.getItem(STORE_KEY);
+      const raw = localStorage.getItem(STORE_KEY);
       if (!raw) return false;
       const data = JSON.parse(raw);
       if (!Array.isArray(data.chats) || !data.chats.length) return false;
@@ -338,10 +338,6 @@
     });
   }
 
-  function clearNode(node) {
-    while (node.firstChild) node.removeChild(node.firstChild);
-  }
-
   function renderMessages() {
     stopSpeaking();
     const chat = activeChat();
@@ -352,7 +348,7 @@
     messagesEl.classList.toggle('show', hasMsgs);
     exportBtn.disabled = !hasMsgs;
 
-    clearNode(messagesEl);
+    messagesEl.replaceChildren();
 
     msgs.forEach((m, i) => {
       if (m.role === 'user') {
@@ -537,8 +533,6 @@
     save();
     renderSidebar();
     renderMessages();
-    emptyState.style.display = 'none';
-    messagesEl.classList.add('show');
 
     setBusy(true);
     showTyping();
@@ -557,7 +551,8 @@
         signal: controller.signal
       });
 
-      const data = await res.json();
+      const ct = res.headers.get('content-type') || '';
+      const data = ct.includes('application/json') ? await res.json() : { ok: false, reply: 'Server error. Please try again.' };
       hideTyping();
 
       chat.messages.push({
@@ -640,6 +635,15 @@
   overlay.addEventListener('click', closeSidebarMobile);
   newChatBtn.addEventListener('click', startNewChat);
   exportBtn.addEventListener('click', exportChat);
+
+  window.addEventListener('resize', () => {
+    if (window.innerWidth > 860) {
+      sidebar.classList.remove('open');
+      overlay.classList.remove('show');
+    } else {
+      sidebar.classList.remove('hidden');
+    }
+  });
 
   sendBtn.addEventListener('click', () => {
     if (busy) stopGeneration();

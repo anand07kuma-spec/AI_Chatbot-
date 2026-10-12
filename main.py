@@ -1,7 +1,7 @@
-﻿import asyncio
-import hashlib
+﻿import hashlib
 import io
 import re
+import threading
 import time
 from collections import OrderedDict
 from pathlib import Path
@@ -40,6 +40,8 @@ app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 
 BUILD_VER = str(int(time.time()))
 
+_index_html_cache = None
+
 GROQ_TRANSCRIBE_URL = "https://api.groq.com/openai/v1/audio/transcriptions"
 WHISPER_MODEL = "whisper-large-v3-turbo"
 WHISPER_PROMPT = (
@@ -50,12 +52,14 @@ VOICE_EN = "en-IN-NeerjaNeural"
 VOICE_HI = "hi-IN-SwaraNeural"
 VOICE_UR = "ur-IN-GulNeural"
 TTS_FALLBACK = "Please check the code shared in the chat."
-TTS_MAX_CHARS = 1500
+TTS_MAX_CHARS = 800
+TTS_RAW_LIMIT = 2500
 CHAT_HISTORY_LIMIT = 24
 CHAT_CONTENT_LIMIT = 6000
 
 _tts_cache: OrderedDict = OrderedDict()
 _TTS_CACHE_MAX = 60
+_tts_lock = threading.Lock()
 
 
 class ChatRequest(BaseModel):
@@ -64,8 +68,10 @@ class ChatRequest(BaseModel):
 
 @app.get("/")
 def index():
-    html = (STATIC_DIR / "index.html").read_text(encoding="utf-8")
-    return HTMLResponse(html.replace("__VER__", BUILD_VER))
+    global _index_html_cache
+    if _index_html_cache is None:
+        _index_html_cache = (STATIC_DIR / "index.html").read_text(encoding="utf-8")
+    return HTMLResponse(_index_html_cache.replace("__VER__", BUILD_VER))
 
 
 @app.post("/api/chat")
@@ -143,8 +149,9 @@ async def _edge_tts(text, voice):
 
 
 @app.post("/api/tts")
-def tts(request: TTSRequest):
-    spoken = strip_markdown(request.text.strip())
+async def tts(request: TTSRequest):
+    raw = request.text.strip()[:TTS_RAW_LIMIT]
+    spoken = strip_markdown(raw)
     if not spoken:
         spoken = TTS_FALLBACK
 
@@ -152,13 +159,14 @@ def tts(request: TTSRequest):
     voice = pick_voice(spoken)
 
     cache_key = hashlib.sha1(f"{voice}|{spoken}".encode("utf-8")).hexdigest()
-    cached = _tts_cache.get(cache_key)
-    if cached is not None:
-        _tts_cache.move_to_end(cache_key)
-        return Response(content=cached, media_type="audio/mpeg")
+    with _tts_lock:
+        cached = _tts_cache.get(cache_key)
+        if cached is not None:
+            _tts_cache.move_to_end(cache_key)
+            return Response(content=cached, media_type="audio/mpeg")
 
     try:
-        audio = asyncio.run(_edge_tts(spoken, voice))
+        audio = await _edge_tts(spoken, voice)
     except Exception as error:
         print(f"TTS error: {error}")
         return JSONResponse({"ok": False}, status_code=502)
@@ -166,10 +174,11 @@ def tts(request: TTSRequest):
     if not audio:
         return JSONResponse({"ok": False}, status_code=502)
 
-    _tts_cache[cache_key] = audio
-    _tts_cache.move_to_end(cache_key)
-    while len(_tts_cache) > _TTS_CACHE_MAX:
-        _tts_cache.popitem(last=False)
+    with _tts_lock:
+        _tts_cache[cache_key] = audio
+        _tts_cache.move_to_end(cache_key)
+        while len(_tts_cache) > _TTS_CACHE_MAX:
+            _tts_cache.popitem(last=False)
 
     return Response(content=audio, media_type="audio/mpeg")
 
