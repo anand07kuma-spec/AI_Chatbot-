@@ -1,4 +1,4 @@
-import os
+﻿import os
 import httpx
 from dotenv import load_dotenv
 
@@ -36,7 +36,7 @@ def get_response(messages):
     model = os.getenv("GROQ_MODEL", DEFAULT_MODEL).strip() or DEFAULT_MODEL
 
     system_prompt = (
-        "You are NOVA AI, a friendly and helpful assistant. "
+        "You are Astra AI, a friendly and helpful assistant. "
         "Reply in plain, readable text. Do not use LaTeX or math markup, "
         "and keep markdown simple (no code-heavy answers unless asked). "
         "Be concise and conversational."

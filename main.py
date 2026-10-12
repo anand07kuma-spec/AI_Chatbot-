@@ -1,4 +1,4 @@
-from pathlib import Path
+﻿from pathlib import Path
 
 from fastapi import FastAPI
 from fastapi.responses import FileResponse, JSONResponse
@@ -10,7 +10,7 @@ from chatbot import get_response
 BASE_DIR = Path(__file__).resolve().parent
 STATIC_DIR = BASE_DIR / "static"
 
-app = FastAPI(title="NOVA AI Chatbot")
+app = FastAPI(title="Astra AI Chatbot")
 
 app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 

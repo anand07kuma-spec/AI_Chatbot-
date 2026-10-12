@@ -1,4 +1,4 @@
-(() => {
+﻿(() => {
   'use strict';
 
   // ---------- Elements ----------
@@ -16,9 +16,11 @@
   const sendBtn = document.getElementById('sendBtn');
   const sendIcon = document.getElementById('sendIcon');
   const stopIcon = document.getElementById('stopIcon');
+  const micBtn = document.getElementById('micBtn');
 
-  const STORE_KEY = 'nova_chats_v1';
+  const STORE_KEY = 'astra_chats_v1';
   const MAX_TITLE = 34;
+  const PLACEHOLDER = 'Message Astra AI...';
 
   // ---------- State ----------
   let chats = [];
@@ -26,6 +28,9 @@
   let nextId = 1;
   let busy = false;
   let controller = null;
+  let speakingBtn = null;
+  let listening = false;
+  let hintTimer = null;
 
   // ---------- Persistence ----------
   function save() {
@@ -65,6 +70,131 @@
       activeId = c.id;
     }
     if (!activeChat()) activeId = chats[0].id;
+  }
+
+  // ---------- Voice: text-to-speech (speak replies) ----------
+  const hasTTS = 'speechSynthesis' in window;
+
+  const SPK_ICON = '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><path d="M15.54 8.46a5 5 0 0 1 0 7.07"/></svg>';
+  const STOP_SMALL_ICON = '<svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="6" width="12" height="12" rx="2"/></svg>';
+
+  function resetSpeakBtn(btn) {
+    if (!btn) return;
+    btn.innerHTML = SPK_ICON + ' Listen';
+    btn.classList.remove('speaking');
+    if (speakingBtn === btn) speakingBtn = null;
+  }
+
+  function stopSpeaking() {
+    if (hasTTS && window.speechSynthesis.speaking) {
+      window.speechSynthesis.cancel();
+    }
+    if (speakingBtn) resetSpeakBtn(speakingBtn);
+    speakingBtn = null;
+  }
+
+  function speakText(text, btn) {
+    if (!hasTTS) return;
+
+    if (speakingBtn === btn) {
+      stopSpeaking();
+      return;
+    }
+
+    stopSpeaking();
+
+    const u = new SpeechSynthesisUtterance(text);
+    const voices = window.speechSynthesis.getVoices();
+    const preferred =
+      voices.find(v => v.lang === 'en-IN') ||
+      voices.find(v => v.lang && v.lang.replace('_', '-').startsWith('en')) ||
+      voices[0];
+    if (preferred) u.voice = preferred;
+    u.rate = 1.03;
+    u.pitch = 1;
+
+    speakingBtn = btn;
+    btn.innerHTML = STOP_SMALL_ICON + ' Stop';
+    btn.classList.add('speaking');
+
+    u.onend = () => resetSpeakBtn(btn);
+    u.onerror = () => resetSpeakBtn(btn);
+    window.speechSynthesis.speak(u);
+  }
+
+  // ---------- Voice: speech-to-text (voice input) ----------
+  const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+  let recognition = null;
+
+  function setHint(msg) {
+    inputEl.placeholder = msg;
+    clearTimeout(hintTimer);
+    hintTimer = setTimeout(() => {
+      inputEl.placeholder = PLACEHOLDER;
+    }, 3200);
+  }
+
+  function stopListening() {
+    if (listening && recognition) {
+      try { recognition.stop(); } catch (e) { /* ignore */ }
+    }
+  }
+
+  function initVoiceInput() {
+    if (!SR) {
+      micBtn.style.display = 'none';
+      return;
+    }
+    recognition = new SR();
+    recognition.lang = 'en-IN';
+    recognition.interimResults = false;
+    recognition.maxAlternatives = 1;
+
+    recognition.onstart = () => {
+      listening = true;
+      micBtn.classList.add('listening');
+      micBtn.title = 'Listening… click to stop';
+      inputEl.placeholder = 'Listening… speak now';
+      stopSpeaking();
+    };
+
+    recognition.onresult = (e) => {
+      const text = (e.results[0][0].transcript || '').trim();
+      if (text) {
+        inputEl.value = text;
+        inputEl.dispatchEvent(new Event('input'));
+        inputEl.focus();
+      }
+    };
+
+    recognition.onerror = (e) => {
+      if (e.error === 'not-allowed' || e.error === 'service-not-allowed') {
+        setHint('Microphone blocked — allow mic access in browser.');
+      } else if (e.error === 'no-speech') {
+        setHint('Didn\'t catch that — please try again.');
+      } else if (e.error !== 'aborted') {
+        setHint('Voice input failed — try again.');
+      }
+    };
+
+    recognition.onend = () => {
+      listening = false;
+      micBtn.classList.remove('listening');
+      micBtn.title = 'Speak your message';
+      if (inputEl.placeholder === 'Listening… speak now') {
+        inputEl.placeholder = PLACEHOLDER;
+      }
+    };
+
+    micBtn.addEventListener('click', () => {
+      if (busy) return;
+      if (listening) {
+        try { recognition.stop(); } catch (e) { /* ignore */ }
+        return;
+      }
+      stopSpeaking();
+      try { recognition.start(); } catch (e) { /* already started */ }
+    });
   }
 
   // ---------- Rendering ----------
@@ -107,6 +237,7 @@
   }
 
   function renderMessages() {
+    stopSpeaking();
     const chat = activeChat();
     const msgs = chat ? chat.messages : [];
     const hasMsgs = msgs.length > 0;
@@ -141,7 +272,7 @@
 
       const name = document.createElement('div');
       name.className = 'assistant-name';
-      name.textContent = m.error ? 'NOVA AI · error' : 'NOVA AI';
+      name.textContent = m.error ? 'Astra AI · error' : 'Astra AI';
 
       const text = document.createElement('div');
       text.className = 'assistant-text';
@@ -165,6 +296,15 @@
         }).catch(() => {});
       });
       actions.appendChild(copyBtn);
+
+      if (hasTTS) {
+        const speakBtn = document.createElement('button');
+        speakBtn.className = 'mini-btn';
+        speakBtn.innerHTML = SPK_ICON + ' Listen';
+        speakBtn.title = 'Read aloud';
+        speakBtn.addEventListener('click', () => speakText(m.content, speakBtn));
+        actions.appendChild(speakBtn);
+      }
 
       if (m.error && i === msgs.length - 1) {
         const retryBtn = document.createElement('button');
@@ -190,7 +330,7 @@
     wrap.innerHTML =
       '<div class="avatar">✦</div>' +
       '<div class="assistant-body">' +
-      '<div class="assistant-name">NOVA AI</div>' +
+      '<div class="assistant-name">Astra AI</div>' +
       '<div class="typing"><i></i><i></i><i></i></div>' +
       '</div>';
     messagesEl.appendChild(wrap);
@@ -261,15 +401,15 @@
     if (!chat || !chat.messages.length) return;
 
     const lines = chat.messages.map(m => {
-      const who = m.role === 'user' ? 'You' : 'NOVA AI';
+      const who = m.role === 'user' ? 'You' : 'Astra AI';
       return `${who}:\n${m.content}\n`;
     });
 
-    const blob = new Blob([`NOVA AI — ${chat.title}\n\n${lines.join('\n')}`], { type: 'text/plain' });
+    const blob = new Blob([`Astra AI — ${chat.title}\n\n${lines.join('\n')}`], { type: 'text/plain' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = 'nova_chat.txt';
+    a.download = 'astra_chat.txt';
     a.click();
     URL.revokeObjectURL(url);
   }
@@ -292,6 +432,9 @@
     if (busy) return;
     text = text.trim();
     if (!text) return;
+
+    stopSpeaking();
+    stopListening();
 
     ensureChat();
     const chat = activeChat();
@@ -434,6 +577,12 @@
   });
 
   // ---------- Init ----------
+  if (hasTTS) {
+    window.speechSynthesis.getVoices();
+    window.speechSynthesis.onvoiceschanged = () => window.speechSynthesis.getVoices();
+  }
+  initVoiceInput();
+
   if (!load()) {
     const c = newChatObject();
     chats.push(c);

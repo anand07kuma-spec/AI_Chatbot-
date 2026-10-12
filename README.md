@@ -1,4 +1,4 @@
-﻿# 🤖 NOVA AI Chatbot
+﻿# 🤖 Astra AI Chatbot
 
 A fast AI Chatbot built using **Python**, **FastAPI**, and **Groq**, with a clean dark chat UI.
 
@@ -69,7 +69,7 @@ Open **http://127.0.0.1:8000** in your browser.
 3. Render will auto-detect `render.yaml` (build & start commands).
 4. In **Environment**, add:
    - `GROQ_API_KEY` = your xAI API key
-5. Deploy — you get a fast public URL like `https://nova-ai-chatbot.onrender.com`.
+5. Deploy — you get a fast public URL like `https://astra-ai-chatbot.onrender.com`.
 
 ## 👨‍💻 Author
 
