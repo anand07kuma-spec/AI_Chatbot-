@@ -150,7 +150,7 @@
     }
   }
 
-  // ---------- Voice: speech-to-text (server: Groq Whisper) ----------
+  // ---------- Voice: speech-to-text (server: Whisper) ----------
   let mediaRecorder = null;
   let mediaStream = null;
   let audioChunks = [];
@@ -384,10 +384,6 @@
       const wrap = document.createElement('div');
       wrap.className = 'msg assistant' + (m.error ? ' error' : '');
 
-      const avatar = document.createElement('div');
-      avatar.className = 'avatar';
-      avatar.textContent = '✦';
-
       const body = document.createElement('div');
       body.className = 'assistant-body';
 
@@ -434,7 +430,6 @@
       }
 
       body.appendChild(actions);
-      wrap.appendChild(avatar);
       wrap.appendChild(body);
       messagesEl.appendChild(wrap);
     });
@@ -447,7 +442,6 @@
     wrap.className = 'msg assistant';
     wrap.id = 'typingMsg';
     wrap.innerHTML =
-      '<div class="avatar">✦</div>' +
       '<div class="assistant-body">' +
       '<div class="assistant-name">Astra AI</div>' +
       '<div class="typing"><i></i><i></i><i></i></div>' +
