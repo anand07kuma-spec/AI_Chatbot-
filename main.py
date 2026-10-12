@@ -1,5 +1,6 @@
 ﻿import asyncio
 import io
+import re
 from pathlib import Path
 
 import edge_tts
@@ -20,8 +21,14 @@ app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 
 GROQ_TRANSCRIBE_URL = "https://api.groq.com/openai/v1/audio/transcriptions"
 WHISPER_MODEL = "whisper-large-v3-turbo"
+WHISPER_PROMPT = (
+    "Python, code, program, function, leap year, late, please, "
+    "Hinglish, Hindi and English mix. Technical words in English."
+)
 VOICE_EN = "en-IN-NeerjaNeural"
 VOICE_HI = "hi-IN-SwaraNeural"
+VOICE_UR = "ur-IN-GulNeural"
+TTS_FALLBACK = "Please check the code shared in the chat."
 TTS_MAX_CHARS = 1500
 
 
@@ -68,7 +75,33 @@ class TTSRequest(BaseModel):
 def pick_voice(text):
     if any("ऀ" <= ch <= "ॿ" for ch in text):
         return VOICE_HI
+    if any("؀" <= ch <= "ۿ" for ch in text):
+        return VOICE_UR
     return VOICE_EN
+
+
+def strip_markdown(text):
+    """Convert markdown to plain spoken text (no symbols, no code)."""
+    text = re.sub(r"```.*?```", " ", text, flags=re.DOTALL)
+    text = re.sub(r"`([^`]*)`", r"\1", text)
+    text = re.sub(r"!\[([^\]]*)\]\([^)]*\)", r"\1", text)
+    text = re.sub(r"\[([^\]]+)\]\([^)]*\)", r"\1", text)
+    text = re.sub(r"^#{1,6}\s*", "", text, flags=re.MULTILINE)
+    text = re.sub(r"\*\*\*([^*]+)\*\*\*", r"\1", text)
+    text = re.sub(r"\*\*([^*]+)\*\*", r"\1", text)
+    text = re.sub(r"\*([^*]+)\*", r"\1", text)
+    text = re.sub(r"__([^_]+)__", r"\1", text)
+    text = re.sub(r"(?<!\w)_([^_]+)_(?!\w)", r"\1", text)
+    text = re.sub(r"~~([^~]+)~~", r"\1", text)
+    text = re.sub(r"^\s*>\s?", "", text, flags=re.MULTILINE)
+    text = re.sub(r"^\s*[-*+•]\s+", "", text, flags=re.MULTILINE)
+    text = re.sub(r"^\s*\d+\.\s+", "", text, flags=re.MULTILINE)
+    text = re.sub(r"^\s*[-*_]{3,}\s*$", " ", text, flags=re.MULTILINE)
+    text = re.sub(r"\|", " ", text)
+    text = re.sub(r"\n{2,}", "\n", text)
+    text = re.sub(r"[ \t]{2,}", " ", text)
+    text = text.replace("*", "").replace("#", "").replace("`", "")
+    return text.strip()
 
 
 async def _edge_tts(text, voice):
@@ -82,15 +115,15 @@ async def _edge_tts(text, voice):
 
 @app.post("/api/tts")
 def tts(request: TTSRequest):
-    text = request.text.strip()
-    if not text:
-        return JSONResponse({"ok": False}, status_code=400)
+    spoken = strip_markdown(request.text.strip())
+    if not spoken:
+        spoken = TTS_FALLBACK
 
-    text = text[:TTS_MAX_CHARS]
-    voice = pick_voice(text)
+    spoken = spoken[:TTS_MAX_CHARS]
+    voice = pick_voice(spoken)
 
     try:
-        audio = asyncio.run(_edge_tts(text, voice))
+        audio = asyncio.run(_edge_tts(spoken, voice))
     except Exception as error:
         print(f"TTS error: {error}")
         return JSONResponse({"ok": False}, status_code=502)
@@ -119,7 +152,12 @@ async def transcribe(file: UploadFile = File(...)):
             response = await client.post(
                 GROQ_TRANSCRIBE_URL,
                 headers={"Authorization": f"Bearer {api_key}"},
-                data={"model": WHISPER_MODEL, "response_format": "json"},
+                data={
+                    "model": WHISPER_MODEL,
+                    "response_format": "json",
+                    "prompt": WHISPER_PROMPT,
+                    "temperature": "0",
+                },
                 files={"file": (filename, content, mime)},
             )
     except Exception as error:
