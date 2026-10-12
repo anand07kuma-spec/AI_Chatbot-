@@ -18,6 +18,9 @@
   const micBtn = document.getElementById('micBtn');
   const ctxMenu = document.getElementById('ctxMenu');
   const ctxDelete = document.getElementById('ctxDelete');
+  const attachBtn = document.getElementById('attachBtn');
+  const fileInput = document.getElementById('fileInput');
+  const attachChips = document.getElementById('attachChips');
 
   // ---------- Persistence ----------
   const STORE_KEY = 'astra_chats_v1';
@@ -33,6 +36,144 @@
   let speakingBtn = null;
   let transcribing = false;
   let hintTimer = null;
+  let pendingFiles = [];  // {id, name, kind: 'image'|'doc', mime?, data?, text?, thumb?, loading?}
+
+  // ---------- Attachments ----------
+  const MAX_FILES = 5;
+  const MAX_IMG_BYTES = 8 * 1024 * 1024;
+  let fileIdSeq = 1;
+
+  function renderChips() {
+    if (!pendingFiles.length) {
+      attachChips.style.display = 'none';
+      attachChips.replaceChildren();
+      return;
+    }
+    attachChips.style.display = '';
+    attachChips.replaceChildren();
+
+    pendingFiles.forEach(f => {
+      const chip = document.createElement('div');
+      chip.className = 'attach-chip' + (f.loading ? ' loading' : '');
+
+      if (f.kind === 'image' && f.thumb) {
+        const img = document.createElement('img');
+        img.src = f.thumb;
+        img.alt = f.name;
+        chip.appendChild(img);
+      } else {
+        const icon = document.createElement('span');
+        icon.textContent = f.kind === 'doc' ? '📄' : '📎';
+        chip.appendChild(icon);
+      }
+
+      const name = document.createElement('span');
+      name.className = 'chip-name';
+      name.textContent = f.loading ? 'Loading…' : f.name;
+      name.title = f.name;
+      chip.appendChild(name);
+
+      const remove = document.createElement('button');
+      remove.className = 'chip-remove';
+      remove.textContent = '×';
+      remove.title = 'Remove';
+      remove.addEventListener('click', () => {
+        pendingFiles = pendingFiles.filter(x => x.id !== f.id);
+        renderChips();
+      });
+      chip.appendChild(remove);
+
+      attachChips.appendChild(chip);
+    });
+  }
+
+  function makeThumb(file) {
+    return new Promise((resolve) => {
+      const url = URL.createObjectURL(file);
+      const img = new Image();
+      img.onload = () => {
+        const c = document.createElement('canvas');
+        const scale = Math.min(1, 128 / Math.max(img.width, img.height));
+        c.width = Math.round(img.width * scale);
+        c.height = Math.round(img.height * scale);
+        c.getContext('2d').drawImage(img, 0, 0, c.width, c.height);
+        URL.revokeObjectURL(url);
+        resolve(c.toDataURL('image/jpeg', 0.7));
+      };
+      img.onerror = () => { URL.revokeObjectURL(url); resolve(null); };
+      img.src = url;
+    });
+  }
+
+  function readAsDataURL(file) {
+    return new Promise((resolve, reject) => {
+      const r = new FileReader();
+      r.onload = () => resolve(r.result);
+      r.onerror = reject;
+      r.readAsDataURL(file);
+    });
+  }
+
+  async function addFiles(fileList) {
+    const files = Array.from(fileList);
+    if (!files.length) return;
+
+    for (const file of files) {
+      if (pendingFiles.length >= MAX_FILES) {
+        setHint('Max ' + MAX_FILES + ' files at once.');
+        break;
+      }
+
+      const isImage = file.type.startsWith('image/');
+      const isDoc = /\.(pdf|docx|txt|md|csv|json|log|py|js|html|css|xml|yml|yaml)$/i.test(file.name);
+
+      if (!isImage && !isDoc) {
+        setHint('Unsupported file: ' + file.name);
+        continue;
+      }
+
+      if (isImage && file.size > MAX_IMG_BYTES) {
+        setHint('Image too large (max 8MB): ' + file.name);
+        continue;
+      }
+
+      const entry = { id: fileIdSeq++, name: file.name, kind: isImage ? 'image' : 'doc', loading: true };
+      pendingFiles.push(entry);
+      renderChips();
+
+      if (isImage) {
+        try {
+          const [dataUrl, thumb] = await Promise.all([readAsDataURL(file), makeThumb(file)]);
+          entry.data = dataUrl;
+          entry.thumb = thumb;
+          entry.mime = file.type || 'image/png';
+          entry.loading = false;
+        } catch (e) {
+          pendingFiles = pendingFiles.filter(x => x.id !== entry.id);
+          setHint('Could not read image: ' + file.name);
+        }
+      } else {
+        try {
+          const fd = new FormData();
+          fd.append('file', file);
+          const res = await fetch('/api/extract', { method: 'POST', body: fd });
+          const data = await res.json();
+          if (data.ok) {
+            entry.text = data.text;
+            entry.loading = false;
+          } else {
+            pendingFiles = pendingFiles.filter(x => x.id !== entry.id);
+            setHint(data.error || 'Could not read file.');
+          }
+        } catch (e) {
+          pendingFiles = pendingFiles.filter(x => x.id !== entry.id);
+          setHint('Upload failed: ' + file.name);
+        }
+      }
+      renderChips();
+    }
+    fileInput.value = '';
+  }
 
   function save() {
     try {
@@ -356,7 +497,31 @@
         wrap.className = 'msg user';
         const bubble = document.createElement('div');
         bubble.className = 'bubble-user';
-        bubble.textContent = m.content;
+
+        if (m.attachments && m.attachments.length) {
+          const attWrap = document.createElement('div');
+          attWrap.className = 'bubble-attachments';
+          m.attachments.forEach(a => {
+            if (a.kind === 'image' && a.thumb) {
+              const img = document.createElement('img');
+              img.src = a.thumb;
+              img.alt = a.name || 'image';
+              img.className = 'bubble-img';
+              img.title = a.name || '';
+              attWrap.appendChild(img);
+            } else {
+              const chip = document.createElement('span');
+              chip.className = 'bubble-doc';
+              chip.textContent = (a.kind === 'doc' ? '📄 ' : '📎 ') + (a.name || 'file');
+              attWrap.appendChild(chip);
+            }
+          });
+          bubble.appendChild(attWrap);
+        }
+
+        const textSpan = document.createElement('span');
+        textSpan.textContent = m.content;
+        bubble.appendChild(textSpan);
         wrap.appendChild(bubble);
         messagesEl.appendChild(wrap);
         return;
@@ -484,7 +649,11 @@
 
     const lines = chat.messages.map(m => {
       const who = m.role === 'user' ? 'You' : 'Astra AI';
-      return `${who}:\n${m.content}\n`;
+      let att = '';
+      if (m.attachments && m.attachments.length) {
+        att = '\n[Attached: ' + m.attachments.map(a => a.name).join(', ') + ']';
+      }
+      return `${who}:\n${m.content}${att}\n`;
     });
 
     const blob = new Blob([`Astra AI — ${chat.title}\n\n${lines.join('\n')}`], { type: 'text/plain' });
@@ -507,16 +676,43 @@
   }
 
   function updateSendEnabled() {
-    sendBtn.disabled = busy ? false : inputEl.value.trim().length === 0;
+    sendBtn.disabled = busy ? false : (inputEl.value.trim().length === 0 && pendingFiles.length === 0);
   }
 
   async function send(text) {
     if (busy) return;
-    text = text.trim();
-    if (!text) return;
+    if (text) text = text.trim();
+    if (!text && !pendingFiles.length) return;
 
     stopSpeaking();
     stopListening();
+
+    const files = pendingFiles.filter(f => !f.loading);
+    if (pendingFiles.some(f => f.loading)) {
+      setHint('Wait for files to finish loading.');
+      return;
+    }
+
+    const images = files.filter(f => f.kind === 'image' && f.data);
+    const docs = files.filter(f => f.kind === 'doc' && f.text);
+
+    if (!text) {
+      text = images.length && !docs.length
+        ? 'What is in this image?'
+        : 'Please analyze the attached files.';
+    }
+
+    let content = text;
+    if (docs.length) {
+      const docParts = docs.map(d => '\n\n[Document: ' + d.name + ']\n' + d.text.slice(0, 8000));
+      content += docParts.join('');
+    }
+
+    const attachMeta = files.map(f => ({
+      kind: f.kind,
+      name: f.name,
+      thumb: f.kind === 'image' ? f.thumb : null,
+    }));
 
     ensureChat();
     const chat = activeChat();
@@ -526,9 +722,12 @@
       chats = [chat, ...chats.filter(c => c.id !== chat.id)];
     }
 
-    chat.messages.push({ role: 'user', content: text });
+    chat.messages.push({ role: 'user', content: text, attachments: attachMeta });
     inputEl.value = '';
     inputEl.style.height = 'auto';
+    pendingFiles = [];
+    renderChips();
+    updateSendEnabled();
 
     save();
     renderSidebar();
@@ -540,14 +739,28 @@
     controller = new AbortController();
 
     try {
+      const payload = {
+        messages: chat.messages
+          .slice(-24)
+          .map(m => {
+            let c = m.content.slice(0, 6000);
+            if (m.role === 'user') {
+              const userDocs = (m.attachments || []).filter(a => a.kind === 'doc');
+              if (userDocs.length && !c.includes('[Document:')) {
+                c += '\n[User previously attached: ' + userDocs.map(d => d.name).join(', ') + ']';
+              }
+            }
+            return { role: m.role, content: c };
+          })
+      };
+      if (images.length) {
+        payload.images = images.map(im => ({ mime: im.mime, data: im.data.split(',', 1)[1] || im.data }));
+      }
+
       const res = await fetch('/api/chat', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          messages: chat.messages
-            .slice(-24)
-            .map(m => ({ role: m.role, content: m.content.slice(0, 6000) }))
-        }),
+        body: JSON.stringify(payload),
         signal: controller.signal
       });
 
@@ -650,6 +863,30 @@
     else send(inputEl.value);
   });
 
+  attachBtn.addEventListener('click', () => {
+    if (!busy) fileInput.click();
+  });
+
+  fileInput.addEventListener('change', () => {
+    if (fileInput.files && fileInput.files.length) addFiles(fileInput.files);
+  });
+
+  inputEl.addEventListener('paste', (e) => {
+    const items = e.clipboardData && e.clipboardData.items;
+    if (!items) return;
+    const files = [];
+    for (const item of items) {
+      if (item.kind === 'file') {
+        const file = item.getAsFile();
+        if (file) files.push(file);
+      }
+    }
+    if (files.length) {
+      e.preventDefault();
+      addFiles(files);
+    }
+  });
+
   inputEl.addEventListener('keydown', (e) => {
     if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) {
       e.preventDefault();
@@ -680,6 +917,7 @@
   ensureChat();
   renderSidebar();
   renderMessages();
+  renderChips();
   updateSendEnabled();
   inputEl.focus();
 })();

@@ -1,4 +1,5 @@
-﻿import hashlib
+﻿import base64
+import hashlib
 import io
 import re
 import threading
@@ -8,15 +9,18 @@ from pathlib import Path
 
 import edge_tts
 import httpx
+from docx import Document as DocxDocument
 from fastapi import FastAPI, File, Form, UploadFile
 from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
+from PIL import Image
 from pydantic import BaseModel
+from pypdf import PdfReader
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import Request
 
-from chatbot import get_api_key, get_response
+from chatbot import get_api_key, get_response, get_response_with_images
 
 BASE_DIR = Path(__file__).resolve().parent
 STATIC_DIR = BASE_DIR / "static"
@@ -64,6 +68,11 @@ _tts_lock = threading.Lock()
 
 class ChatRequest(BaseModel):
     messages: list[dict]
+    images: list[dict] | None = None  # [{mime, data}] base64
+
+
+class ChatRequestLegacy(BaseModel):
+    messages: list[dict]
 
 
 @app.get("/")
@@ -99,8 +108,81 @@ def chat(request: ChatRequest):
             status_code=400,
         )
 
+    images = request.images or []
+    if images:
+        processed = []
+        for img in images[:5]:
+            mime = str(img.get("mime", "image/png"))
+            data = str(img.get("data", ""))
+            if data.startswith("data:"):
+                data = data.split(",", 1)[-1]
+            if data:
+                processed.append({"mime": mime, "data": data})
+        if processed:
+            result = get_response_with_images(messages, processed)
+            return {"ok": result["ok"], "reply": result["reply"]}
+
     result = get_response(messages)
     return {"ok": result["ok"], "reply": result["reply"]}
+
+
+ALLOWED_DOC_EXTS = {".pdf", ".docx", ".txt", ".md", ".csv", ".json", ".log", ".py", ".js", ".html", ".css", ".xml", ".yml", ".yaml"}
+DOC_MAX_BYTES = 10 * 1024 * 1024
+DOC_MAX_CHARS = 20000
+
+
+@app.post("/api/extract")
+async def extract_doc(file: UploadFile = File(...)):
+    content = await file.read()
+    if not content:
+        return JSONResponse({"ok": False, "error": "Empty file."}, status_code=400)
+
+    if len(content) > DOC_MAX_BYTES:
+        return JSONResponse({"ok": False, "error": "File too large (max 10MB)."}, status_code=400)
+
+    filename = file.filename or "file"
+    ext = Path(filename).suffix.lower()
+
+    if ext not in ALLOWED_DOC_EXTS:
+        return JSONResponse(
+            {"ok": False, "error": f"Unsupported file type '{ext}'. Allowed: PDF, DOCX, TXT, MD, CSV, JSON, code files."},
+            status_code=400,
+        )
+
+    try:
+        if ext == ".pdf":
+            reader = PdfReader(io.BytesIO(content))
+            parts = []
+            for page in reader.pages[:50]:
+                text = page.extract_text() or ""
+                if text.strip():
+                    parts.append(text)
+            text = "\n\n".join(parts)
+        elif ext == ".docx":
+            doc = DocxDocument(io.BytesIO(content))
+            parts = [p.text for p in doc.paragraphs if p.text.strip()]
+            for table in doc.tables:
+                for row in table.rows:
+                    cells = [c.text.strip() for c in row.cells if c.text.strip()]
+                    if cells:
+                        parts.append(" | ".join(cells))
+            text = "\n".join(parts)
+        else:
+            text = content.decode("utf-8", errors="replace")
+    except Exception as error:
+        print(f"Extract error: {error}")
+        return JSONResponse({"ok": False, "error": "Could not read this file."}, status_code=422)
+
+    text = text.strip()
+    if not text:
+        return JSONResponse({"ok": False, "error": "No readable text found in this file."}, status_code=422)
+
+    return {
+        "ok": True,
+        "name": filename,
+        "chars": len(text),
+        "text": text[:DOC_MAX_CHARS],
+    }
 
 
 class TTSRequest(BaseModel):

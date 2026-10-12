@@ -6,6 +6,7 @@ load_dotenv()
 
 GROQ_API_URL = "https://api.groq.com/openai/v1/chat/completions"
 DEFAULT_MODEL = "openai/gpt-oss-120b"
+VISION_MODEL = "qwen/qwen3.8-27b"
 REQUEST_TIMEOUT = 60.0
 
 
@@ -143,3 +144,78 @@ def get_response(messages):
             "ok": False,
             "reply": "Something went wrong while contacting Groq. Please try again.",
         }
+
+
+def get_response_with_images(messages, images):
+    """Send chat with base64 images to Groq vision model."""
+
+    if not isinstance(messages, list) or not messages:
+        return {"ok": False, "reply": "Please enter a message."}
+
+    api_key = get_api_key()
+    if not api_key:
+        return {"ok": False, "reply": "API key is missing."}
+
+    system_prompt = (
+        "You are Astra AI, a friendly and helpful assistant. "
+        "The user has shared image(s) with you. Analyze and describe them accurately. "
+        "ALWAYS detect the language of the user's message and reply in EXACTLY the same language. "
+        "If the user asks for code, give complete, runnable code first. "
+        "Keep replies concise and conversational with minimal markdown."
+    )
+
+    content_parts = []
+    last_msg = messages[-1]
+    content_parts.append({"type": "text", "text": str(last_msg.get("content", "What is in this image?"))})
+
+    for img in images[:5]:
+        mime = img.get("mime", "image/png")
+        data = img.get("data", "")
+        if data:
+            content_parts.append({
+                "type": "image_url",
+                "image_url": {"url": f"data:{mime};base64,{data}"},
+            })
+
+    api_messages = [{"role": "system", "content": system_prompt}]
+    for m in messages[:-1]:
+        api_messages.append({"role": m["role"], "content": str(m.get("content", ""))[:4000]})
+    api_messages.append({"role": "user", "content": content_parts})
+
+    payload = {
+        "model": VISION_MODEL,
+        "messages": api_messages,
+        "max_tokens": 2048,
+        "stream": False,
+    }
+
+    headers = {
+        "Authorization": f"Bearer {api_key}",
+        "Content-Type": "application/json",
+    }
+
+    try:
+        response = httpx.post(GROQ_API_URL, json=payload, headers=headers, timeout=REQUEST_TIMEOUT)
+
+        if response.status_code == 429:
+            return {"ok": False, "reply": "Rate limit reached. Please wait a moment and try again."}
+
+        if response.status_code != 200:
+            try:
+                msg = str(response.json().get("error", {}).get("message", ""))[:200]
+            except Exception:
+                msg = ""
+            print(f"Vision API error {response.status_code}: {msg}")
+            return {"ok": False, "reply": f"Image analysis failed ({response.status_code}). {msg}"}
+
+        data = response.json()
+        answer = data.get("choices", [{}])[0].get("message", {}).get("content", "")
+        if answer and answer.strip():
+            return {"ok": True, "reply": answer.strip()}
+        return {"ok": False, "reply": "I couldn't analyze the image. Please try again."}
+
+    except httpx.TimeoutException:
+        return {"ok": False, "reply": "The request took too long. Please try again."}
+    except Exception as error:
+        print(f"Vision API error: {error}")
+        return {"ok": False, "reply": "Something went wrong. Please try again."}
