@@ -17,6 +17,9 @@
   const sendIcon = document.getElementById('sendIcon');
   const stopIcon = document.getElementById('stopIcon');
   const micBtn = document.getElementById('micBtn');
+  const langBtn = document.getElementById('langBtn');
+  const ctxMenu = document.getElementById('ctxMenu');
+  const ctxDelete = document.getElementById('ctxDelete');
 
   const STORE_KEY = 'astra_chats_v1';
   const MAX_TITLE = 34;
@@ -179,6 +182,7 @@
 
     const fd = new FormData();
     fd.append('file', blob, 'speech.webm');
+    fd.append('lang', sttLang);
 
     try {
       const res = await fetch('/api/transcribe', { method: 'POST', body: fd });
@@ -270,6 +274,50 @@
     });
   }
 
+  // ---------- Context menu (right-click delete) ----------
+  let ctxChatId = null;
+
+  function hideCtxMenu() {
+    ctxMenu.style.display = 'none';
+    ctxChatId = null;
+  }
+
+  document.addEventListener('click', (e) => {
+    if (!ctxMenu.contains(e.target)) hideCtxMenu();
+  });
+
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') hideCtxMenu();
+  });
+
+  scrollArea.addEventListener('scroll', hideCtxMenu);
+
+  ctxDelete.addEventListener('click', () => {
+    if (ctxChatId != null) deleteChat(ctxChatId);
+    hideCtxMenu();
+  });
+
+  // ---------- Mic language (STT) ----------
+  let sttLang = 'en';
+  try {
+    sttLang = localStorage.getItem('astra_stt_lang') === 'hi' ? 'hi' : 'en';
+  } catch (e) { /* ignore */ }
+
+  function renderLang() {
+    langBtn.textContent = sttLang === 'hi' ? 'हिं' : 'EN';
+    langBtn.title = sttLang === 'hi'
+      ? 'Mic language: Hindi (say Hindi clearly)'
+      : 'Mic language: English / Hinglish';
+  }
+
+  langBtn.addEventListener('click', () => {
+    sttLang = sttLang === 'en' ? 'hi' : 'en';
+    try { localStorage.setItem('astra_stt_lang', sttLang); } catch (e) { /* ignore */ }
+    renderLang();
+  });
+
+  renderLang();
+
   // ---------- Rendering ----------
   function renderSidebar() {
     chatList.innerHTML = '';
@@ -282,15 +330,15 @@
       label.textContent = chat.title;
       item.appendChild(label);
 
-      const del = document.createElement('span');
-      del.className = 'chat-del';
-      del.innerHTML = '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M18 6L6 18M6 6l12 12"/></svg>';
-      del.title = 'Delete chat';
-      del.addEventListener('click', (e) => {
-        e.stopPropagation();
-        deleteChat(chat.id);
+      item.addEventListener('contextmenu', (e) => {
+        e.preventDefault();
+        ctxChatId = chat.id;
+        ctxMenu.style.display = 'block';
+        const x = Math.min(e.clientX, window.innerWidth - 170);
+        const y = Math.min(e.clientY, window.innerHeight - 56);
+        ctxMenu.style.left = x + 'px';
+        ctxMenu.style.top = y + 'px';
       });
-      item.appendChild(del);
 
       item.addEventListener('click', () => {
         if (busy) return;

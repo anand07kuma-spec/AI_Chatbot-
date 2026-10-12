@@ -12,6 +12,10 @@
 
 <div id="overlay" class="overlay"></div>
 
+<div id="ctxMenu" class="ctx-menu" style="display:none">
+  <button id="ctxDelete" class="ctx-item">🗑 Delete chat</button>
+</div>
+
 <aside id="sidebar" class="sidebar">
   <div class="side-top">
     <div class="logo">✦ Astra AI</div>
@@ -23,6 +27,7 @@
 
   <div class="side-label">Recent</div>
   <nav id="chatList" class="chat-list"></nav>
+  <div class="side-hint">Right-click a chat to delete</div>
 
   <div class="side-bottom">
     <button id="exportBtn" class="side-action">
@@ -66,6 +71,7 @@
   <footer class="composer-wrap">
     <div class="composer">
       <textarea id="input" rows="1" placeholder="Message Astra AI..." spellcheck="false"></textarea>
+      <button id="langBtn" class="lang-btn" title="Mic language">EN</button>
       <button id="micBtn" class="mic-btn" title="Speak your message">
         <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" y1="19" x2="12" y2="23"/><line x1="8" y1="23" x2="16" y2="23"/></svg>
       </button>

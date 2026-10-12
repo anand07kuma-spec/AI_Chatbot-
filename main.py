@@ -5,7 +5,7 @@ from pathlib import Path
 
 import edge_tts
 import httpx
-from fastapi import FastAPI, File, UploadFile
+from fastapi import FastAPI, File, Form, UploadFile
 from fastapi.responses import FileResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
@@ -135,7 +135,7 @@ def tts(request: TTSRequest):
 
 
 @app.post("/api/transcribe")
-async def transcribe(file: UploadFile = File(...)):
+async def transcribe(file: UploadFile = File(...), lang: str = Form("en")):
     api_key = get_api_key()
     if not api_key:
         return JSONResponse({"ok": False, "text": ""}, status_code=400)
@@ -147,17 +147,21 @@ async def transcribe(file: UploadFile = File(...)):
     mime = file.content_type or "audio/webm"
     filename = file.filename or ("audio.webm" if "webm" in mime else "audio.ogg")
 
+    form = {
+        "model": WHISPER_MODEL,
+        "response_format": "json",
+        "prompt": WHISPER_PROMPT,
+        "temperature": "0",
+    }
+    if lang in ("en", "hi", "ur"):
+        form["language"] = lang
+
     try:
         async with httpx.AsyncClient(timeout=60) as client:
             response = await client.post(
                 GROQ_TRANSCRIBE_URL,
                 headers={"Authorization": f"Bearer {api_key}"},
-                data={
-                    "model": WHISPER_MODEL,
-                    "response_format": "json",
-                    "prompt": WHISPER_PROMPT,
-                    "temperature": "0",
-                },
+                data=form,
                 files={"file": (filename, content, mime)},
             )
     except Exception as error:
