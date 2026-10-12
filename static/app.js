@@ -6,7 +6,6 @@
   const overlay = document.getElementById('overlay');
   const menuBtn = document.getElementById('menuBtn');
   const newChatBtn = document.getElementById('newChatBtn');
-  const clearBtn = document.getElementById('clearBtn');
   const exportBtn = document.getElementById('exportBtn');
   const chatList = document.getElementById('chatList');
   const scrollArea = document.getElementById('scrollArea');
@@ -165,7 +164,7 @@
     if (state === 'recording') {
       micBtn.classList.add('listening');
       micBtn.title = 'Recording… click to stop';
-      inputEl.placeholder = 'Recording… click mic to stop';
+      inputEl.placeholder = 'Recording (' + langEntry().name + ')… click mic to stop';
     } else if (state === 'busy') {
       micBtn.classList.add('busy');
       micBtn.title = 'Transcribing…';
@@ -298,20 +297,30 @@
   });
 
   // ---------- Mic language (STT) ----------
+  const LANGS = [
+    { code: 'en', label: 'EN', name: 'English / Hinglish' },
+    { code: 'hi', label: 'हिं', name: 'Hindi' },
+    { code: 'ur', label: 'اردو', name: 'Urdu' }
+  ];
   let sttLang = 'en';
   try {
-    sttLang = localStorage.getItem('astra_stt_lang') === 'hi' ? 'hi' : 'en';
+    const saved = localStorage.getItem('astra_stt_lang');
+    if (LANGS.some(l => l.code === saved)) sttLang = saved;
   } catch (e) { /* ignore */ }
 
+  function langEntry() {
+    return LANGS.find(l => l.code === sttLang) || LANGS[0];
+  }
+
   function renderLang() {
-    langBtn.textContent = sttLang === 'hi' ? 'हिं' : 'EN';
-    langBtn.title = sttLang === 'hi'
-      ? 'Mic language: Hindi (say Hindi clearly)'
-      : 'Mic language: English / Hinglish';
+    const entry = langEntry();
+    langBtn.textContent = entry.label;
+    langBtn.title = 'Mic language: ' + entry.name + ' (click to change)';
   }
 
   langBtn.addEventListener('click', () => {
-    sttLang = sttLang === 'en' ? 'hi' : 'en';
+    const i = LANGS.findIndex(l => l.code === sttLang);
+    sttLang = LANGS[(i + 1) % LANGS.length].code;
     try { localStorage.setItem('astra_stt_lang', sttLang); } catch (e) { /* ignore */ }
     renderLang();
   });
@@ -497,18 +506,6 @@
     renderMessages();
   }
 
-  function clearActiveChat() {
-    if (busy) return;
-    const chat = activeChat();
-    if (!chat) return;
-    chat.messages = [];
-    chat.title = 'New chat';
-    save();
-    renderSidebar();
-    renderMessages();
-    inputEl.focus();
-  }
-
   function exportChat() {
     const chat = activeChat();
     if (!chat || !chat.messages.length) return;
@@ -663,7 +660,6 @@
 
   overlay.addEventListener('click', closeSidebarMobile);
   newChatBtn.addEventListener('click', startNewChat);
-  clearBtn.addEventListener('click', clearActiveChat);
   exportBtn.addEventListener('click', exportChat);
 
   sendBtn.addEventListener('click', () => {

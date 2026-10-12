@@ -1,12 +1,13 @@
 ﻿import asyncio
 import io
 import re
+import time
 from pathlib import Path
 
 import edge_tts
 import httpx
 from fastapi import FastAPI, File, Form, UploadFile
-from fastapi.responses import FileResponse, JSONResponse, Response
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
@@ -18,6 +19,8 @@ STATIC_DIR = BASE_DIR / "static"
 app = FastAPI(title="Astra AI Chatbot")
 
 app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
+
+BUILD_VER = str(int(time.time()))
 
 GROQ_TRANSCRIBE_URL = "https://api.groq.com/openai/v1/audio/transcriptions"
 WHISPER_MODEL = "whisper-large-v3-turbo"
@@ -38,7 +41,8 @@ class ChatRequest(BaseModel):
 
 @app.get("/")
 def index():
-    return FileResponse(STATIC_DIR / "index.html")
+    html = (STATIC_DIR / "index.html").read_text(encoding="utf-8")
+    return HTMLResponse(html.replace("__VER__", BUILD_VER))
 
 
 @app.post("/api/chat")
