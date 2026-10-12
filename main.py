@@ -175,7 +175,7 @@ def tts(request: TTSRequest):
 
 
 @app.post("/api/transcribe")
-async def transcribe(file: UploadFile = File(...), lang: str = Form("en")):
+async def transcribe(file: UploadFile = File(...), lang: str = Form("")):
     api_key = get_api_key()
     if not api_key:
         return JSONResponse({"ok": False, "text": ""}, status_code=400)
@@ -193,8 +193,9 @@ async def transcribe(file: UploadFile = File(...), lang: str = Form("en")):
         "prompt": WHISPER_PROMPT,
         "temperature": "0",
     }
-    if lang in ("en", "hi", "ur"):
+    if lang and lang in ("en", "hi", "ur"):
         form["language"] = lang
+    # else: Whisper auto-detects the language from audio
 
     try:
         async with httpx.AsyncClient(timeout=60) as client:

@@ -16,7 +16,6 @@
   const sendIcon = document.getElementById('sendIcon');
   const stopIcon = document.getElementById('stopIcon');
   const micBtn = document.getElementById('micBtn');
-  const langBtn = document.getElementById('langBtn');
   const ctxMenu = document.getElementById('ctxMenu');
   const ctxDelete = document.getElementById('ctxDelete');
 
@@ -170,7 +169,7 @@
     if (state === 'recording') {
       micBtn.classList.add('listening');
       micBtn.title = 'Recording… click to stop';
-      inputEl.placeholder = 'Recording (' + langEntry().name + ')… click mic to stop';
+      inputEl.placeholder = 'Recording… click mic to stop';
     } else if (state === 'busy') {
       micBtn.classList.add('busy');
       micBtn.title = 'Transcribing…';
@@ -189,7 +188,6 @@
     const ext = mime.includes('mp4') ? 'mp4' : mime.includes('ogg') ? 'ogg' : 'webm';
     const fd = new FormData();
     fd.append('file', blob, 'speech.' + ext);
-    fd.append('lang', sttLang);
 
     try {
       const res = await fetch('/api/transcribe', { method: 'POST', body: fd });
@@ -304,37 +302,6 @@
     if (ctxChatId != null) deleteChat(ctxChatId);
     hideCtxMenu();
   });
-
-  // ---------- Mic language (STT) ----------
-  const LANGS = [
-    { code: 'en', label: 'EN', name: 'English / Hinglish' },
-    { code: 'hi', label: 'हिं', name: 'Hindi' },
-    { code: 'ur', label: 'اردو', name: 'Urdu' }
-  ];
-  let sttLang = 'en';
-  try {
-    const saved = localStorage.getItem('astra_stt_lang');
-    if (LANGS.some(l => l.code === saved)) sttLang = saved;
-  } catch (e) { /* ignore */ }
-
-  function langEntry() {
-    return LANGS.find(l => l.code === sttLang) || LANGS[0];
-  }
-
-  function renderLang() {
-    const entry = langEntry();
-    langBtn.textContent = entry.label;
-    langBtn.title = 'Mic language: ' + entry.name + ' (click to change)';
-  }
-
-  langBtn.addEventListener('click', () => {
-    const i = LANGS.findIndex(l => l.code === sttLang);
-    sttLang = LANGS[(i + 1) % LANGS.length].code;
-    try { localStorage.setItem('astra_stt_lang', sttLang); } catch (e) { /* ignore */ }
-    renderLang();
-  });
-
-  renderLang();
 
   // ---------- Rendering ----------
   function renderSidebar() {

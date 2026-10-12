@@ -461,23 +461,7 @@ button { font-family: inherit; }
   background: rgba(229, 72, 77, 0.1);
 }
 
-/* ---------- Lang toggle + context menu ---------- */
-.lang-btn {
-  height: 38px;
-  min-width: 40px;
-  padding: 0 11px;
-  flex-shrink: 0;
-  background: transparent;
-  border: 1px solid var(--border);
-  border-radius: 19px;
-  color: var(--muted);
-  font-size: 0.76rem;
-  font-weight: 600;
-  cursor: pointer;
-  transition: all 0.15s ease;
-}
-
-.lang-btn:hover { border-color: var(--accent); color: var(--text); }
+/* ---------- Context menu ---------- */
 
 .ctx-menu {
   position: fixed;
@@ -547,11 +531,10 @@ button { font-family: inherit; }
     max-height: 120px;
   }
 
-  .lang-btn, .mic-btn, .send-btn {
+  .mic-btn, .send-btn {
     height: 40px;
+    width: 40px;
   }
-  .mic-btn, .send-btn { width: 40px; }
-  .lang-btn { min-width: 40px; padding: 0 9px; }
 
   .mini-btn { padding: 7px 11px; font-size: 0.76rem; }
   .chat-item { padding-top: 11px; padding-bottom: 11px; }
@@ -561,5 +544,4 @@ button { font-family: inherit; }
 @media (max-width: 400px) {
   .greet { font-size: 1.35rem; }
   .composer textarea { font-size: 16px; }
-  .lang-btn { min-width: 36px; padding: 0 7px; font-size: 0.72rem; }
 }
