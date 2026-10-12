@@ -22,6 +22,8 @@ body {
   font-family: 'Inter', system-ui, sans-serif;
   display: flex;
   overflow: hidden;
+  height: 100vh;
+  height: 100dvh;
 }
 
 button { font-family: inherit; }
@@ -35,6 +37,7 @@ button { font-family: inherit; }
 .sidebar {
   width: var(--sidebar-w);
   height: 100vh;
+  height: 100dvh;
   background: var(--panel);
   border-right: 1px solid var(--border);
   display: flex;
@@ -158,6 +161,7 @@ button { font-family: inherit; }
   display: flex;
   flex-direction: column;
   height: 100vh;
+  height: 100dvh;
   min-width: 0;
   background:
     radial-gradient(ellipse at 50% -20%, rgba(23, 35, 69, 0.75) 0%, var(--bg) 60%);
@@ -355,6 +359,7 @@ button { font-family: inherit; }
 .composer-wrap {
   flex-shrink: 0;
   padding: 10px 20px 14px;
+  padding-bottom: calc(14px + env(safe-area-inset-bottom, 0px));
   background: linear-gradient(transparent, var(--bg) 42%);
 }
 
@@ -532,4 +537,29 @@ button { font-family: inherit; }
   .suggestions { grid-template-columns: 1fr; }
   .empty-state { padding-top: 7vh; }
   .messages { padding: 20px 14px; }
+
+  .topbar { height: 52px; padding: 0 10px; }
+  .composer-wrap { padding: 8px 10px 10px; }
+  .composer { padding: 7px 7px 7px 14px; border-radius: 20px; }
+
+  .composer textarea {
+    font-size: 16px;
+    max-height: 120px;
+  }
+
+  .lang-btn, .mic-btn, .send-btn {
+    height: 40px;
+  }
+  .mic-btn, .send-btn { width: 40px; }
+  .lang-btn { min-width: 40px; padding: 0 9px; }
+
+  .mini-btn { padding: 7px 11px; font-size: 0.76rem; }
+  .chat-item { padding-top: 11px; padding-bottom: 11px; }
+  .new-chat-btn { padding: 11px 14px; }
+}
+
+@media (max-width: 400px) {
+  .greet { font-size: 1.35rem; }
+  .composer textarea { font-size: 16px; }
+  .lang-btn { min-width: 36px; padding: 0 7px; font-size: 0.72rem; }
 }

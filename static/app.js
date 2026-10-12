@@ -76,6 +76,7 @@
 
   // ---------- Voice: text-to-speech (server: Edge Neural voices) ----------
   const ttsAudio = new Audio();
+  let ttsUrl = null;
 
   const SPK_ICON = '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><path d="M15.54 8.46a5 5 0 0 1 0 7.07"/></svg>';
   const STOP_SMALL_ICON = '<svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="6" width="12" height="12" rx="2"/></svg>';
@@ -105,6 +106,10 @@
     try {
       ttsAudio.pause();
       ttsAudio.removeAttribute('src');
+      if (ttsUrl) {
+        URL.revokeObjectURL(ttsUrl);
+        ttsUrl = null;
+      }
     } catch (e) { /* ignore */ }
     if (speakingBtn) resetSpeakBtn(speakingBtn);
     speakingBtn = null;
@@ -133,13 +138,14 @@
       const blob = await res.blob();
       if (!blob.size) throw new Error('empty audio');
 
-      const url = URL.createObjectURL(blob);
+      if (ttsUrl) URL.revokeObjectURL(ttsUrl);
+      ttsUrl = URL.createObjectURL(blob);
 
       btn.classList.remove('loading');
       btn.classList.add('speaking');
       btn.innerHTML = STOP_SMALL_ICON + ' Stop';
 
-      ttsAudio.src = url;
+      ttsAudio.src = ttsUrl;
       ttsAudio.onended = () => resetSpeakBtn(btn);
       ttsAudio.onerror = () => resetSpeakBtn(btn);
       await ttsAudio.play();
@@ -179,8 +185,10 @@
     transcribing = true;
     setMicState('busy');
 
+    const mime = (blob.type || 'audio/webm').split(';')[0];
+    const ext = mime.includes('mp4') ? 'mp4' : mime.includes('ogg') ? 'ogg' : 'webm';
     const fd = new FormData();
-    fd.append('file', blob, 'speech.webm');
+    fd.append('file', blob, 'speech.' + ext);
     fd.append('lang', sttLang);
 
     try {
@@ -281,7 +289,7 @@
     ctxChatId = null;
   }
 
-  document.addEventListener('click', (e) => {
+  document.addEventListener('pointerdown', (e) => {
     if (!ctxMenu.contains(e.target)) hideCtxMenu();
   });
 
@@ -290,6 +298,7 @@
   });
 
   scrollArea.addEventListener('scroll', hideCtxMenu);
+  chatList.addEventListener('scroll', hideCtxMenu);
 
   ctxDelete.addEventListener('click', () => {
     if (ctxChatId != null) deleteChat(ctxChatId);
@@ -574,7 +583,9 @@
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          messages: chat.messages.map(m => ({ role: m.role, content: m.content }))
+          messages: chat.messages
+            .slice(-24)
+            .map(m => ({ role: m.role, content: m.content.slice(0, 6000) }))
         }),
         signal: controller.signal
       });
@@ -621,13 +632,14 @@
       chat.messages.pop();
     }
 
-    let lastUser = null;
+    let idx = -1;
     for (let i = chat.messages.length - 1; i >= 0; i--) {
-      if (chat.messages[i].role === 'user') { lastUser = chat.messages[i].content; break; }
+      if (chat.messages[i].role === 'user') { idx = i; break; }
     }
-    if (!lastUser) return;
+    if (idx === -1) return;
 
-    chat.messages.pop();
+    const lastUser = chat.messages[idx].content;
+    chat.messages.splice(idx);
     save();
     renderMessages();
     send(lastUser);
@@ -668,7 +680,7 @@
   });
 
   inputEl.addEventListener('keydown', (e) => {
-    if (e.key === 'Enter' && !e.shiftKey) {
+    if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) {
       e.preventDefault();
       if (busy) return;
       send(inputEl.value);

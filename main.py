@@ -1,15 +1,20 @@
 ﻿import asyncio
+import hashlib
 import io
 import re
 import time
+from collections import OrderedDict
 from pathlib import Path
 
 import edge_tts
 import httpx
 from fastapi import FastAPI, File, Form, UploadFile
+from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
+from starlette.middleware.base import BaseHTTPMiddleware
+from starlette.requests import Request
 
 from chatbot import get_api_key, get_response
 
@@ -17,6 +22,19 @@ BASE_DIR = Path(__file__).resolve().parent
 STATIC_DIR = BASE_DIR / "static"
 
 app = FastAPI(title="Astra AI Chatbot")
+
+app.add_middleware(GZipMiddleware, minimum_size=500)
+
+
+class StaticCacheMiddleware(BaseHTTPMiddleware):
+    async def dispatch(self, request: Request, call_next):
+        response = await call_next(request)
+        if request.url.path.startswith("/static/"):
+            response.headers["Cache-Control"] = "public, max-age=3600"
+        return response
+
+
+app.add_middleware(StaticCacheMiddleware)
 
 app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 
@@ -33,6 +51,11 @@ VOICE_HI = "hi-IN-SwaraNeural"
 VOICE_UR = "ur-IN-GulNeural"
 TTS_FALLBACK = "Please check the code shared in the chat."
 TTS_MAX_CHARS = 1500
+CHAT_HISTORY_LIMIT = 24
+CHAT_CONTENT_LIMIT = 6000
+
+_tts_cache: OrderedDict = OrderedDict()
+_TTS_CACHE_MAX = 60
 
 
 class ChatRequest(BaseModel):
@@ -50,11 +73,13 @@ def chat(request: ChatRequest):
     messages = [
         {
             "role": m.get("role", "user"),
-            "content": str(m.get("content", "")),
+            "content": str(m.get("content", ""))[:CHAT_CONTENT_LIMIT],
         }
         for m in request.messages
         if m.get("role") in ("user", "assistant") and str(m.get("content", "")).strip()
     ]
+
+    messages = messages[-CHAT_HISTORY_LIMIT:]
 
     if not messages:
         return JSONResponse(
@@ -126,6 +151,12 @@ def tts(request: TTSRequest):
     spoken = spoken[:TTS_MAX_CHARS]
     voice = pick_voice(spoken)
 
+    cache_key = hashlib.sha1(f"{voice}|{spoken}".encode("utf-8")).hexdigest()
+    cached = _tts_cache.get(cache_key)
+    if cached is not None:
+        _tts_cache.move_to_end(cache_key)
+        return Response(content=cached, media_type="audio/mpeg")
+
     try:
         audio = asyncio.run(_edge_tts(spoken, voice))
     except Exception as error:
@@ -134,6 +165,11 @@ def tts(request: TTSRequest):
 
     if not audio:
         return JSONResponse({"ok": False}, status_code=502)
+
+    _tts_cache[cache_key] = audio
+    _tts_cache.move_to_end(cache_key)
+    while len(_tts_cache) > _TTS_CACHE_MAX:
+        _tts_cache.popitem(last=False)
 
     return Response(content=audio, media_type="audio/mpeg")
 
