@@ -29,7 +29,7 @@
   let busy = false;
   let controller = null;
   let speakingBtn = null;
-  let listening = false;
+  let transcribing = false;
   let hintTimer = null;
 
   // ---------- Persistence ----------
@@ -72,128 +72,201 @@
     if (!activeChat()) activeId = chats[0].id;
   }
 
-  // ---------- Voice: text-to-speech (speak replies) ----------
-  const hasTTS = 'speechSynthesis' in window;
+  // ---------- Voice: text-to-speech (server: Edge Neural voices) ----------
+  const ttsAudio = new Audio();
 
   const SPK_ICON = '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><path d="M15.54 8.46a5 5 0 0 1 0 7.07"/></svg>';
   const STOP_SMALL_ICON = '<svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="6" width="12" height="12" rx="2"/></svg>';
 
+  let hintActive = false;
+
+  function setHint(msg) {
+    hintActive = true;
+    inputEl.placeholder = msg;
+    clearTimeout(hintTimer);
+    hintTimer = setTimeout(() => {
+      hintActive = false;
+      if (!isRecording() && !transcribing) {
+        inputEl.placeholder = PLACEHOLDER;
+      }
+    }, 3500);
+  }
+
   function resetSpeakBtn(btn) {
     if (!btn) return;
     btn.innerHTML = SPK_ICON + ' Listen';
-    btn.classList.remove('speaking');
+    btn.classList.remove('speaking', 'loading');
     if (speakingBtn === btn) speakingBtn = null;
   }
 
   function stopSpeaking() {
-    if (hasTTS && window.speechSynthesis.speaking) {
-      window.speechSynthesis.cancel();
-    }
+    try {
+      ttsAudio.pause();
+      ttsAudio.removeAttribute('src');
+    } catch (e) { /* ignore */ }
     if (speakingBtn) resetSpeakBtn(speakingBtn);
     speakingBtn = null;
   }
 
-  function speakText(text, btn) {
-    if (!hasTTS) return;
-
+  async function speakText(text, btn) {
     if (speakingBtn === btn) {
       stopSpeaking();
       return;
     }
 
     stopSpeaking();
-
-    const u = new SpeechSynthesisUtterance(text);
-    const voices = window.speechSynthesis.getVoices();
-    const preferred =
-      voices.find(v => v.lang === 'en-IN') ||
-      voices.find(v => v.lang && v.lang.replace('_', '-').startsWith('en')) ||
-      voices[0];
-    if (preferred) u.voice = preferred;
-    u.rate = 1.03;
-    u.pitch = 1;
-
     speakingBtn = btn;
-    btn.innerHTML = STOP_SMALL_ICON + ' Stop';
-    btn.classList.add('speaking');
+    btn.classList.add('loading');
+    btn.innerHTML = SPK_ICON + ' Loading…';
 
-    u.onend = () => resetSpeakBtn(btn);
-    u.onerror = () => resetSpeakBtn(btn);
-    window.speechSynthesis.speak(u);
+    try {
+      const res = await fetch('/api/tts', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text })
+      });
+
+      if (!res.ok) throw new Error('tts failed');
+
+      const blob = await res.blob();
+      if (!blob.size) throw new Error('empty audio');
+
+      const url = URL.createObjectURL(blob);
+
+      btn.classList.remove('loading');
+      btn.classList.add('speaking');
+      btn.innerHTML = STOP_SMALL_ICON + ' Stop';
+
+      ttsAudio.src = url;
+      ttsAudio.onended = () => resetSpeakBtn(btn);
+      ttsAudio.onerror = () => resetSpeakBtn(btn);
+      await ttsAudio.play();
+    } catch (e) {
+      resetSpeakBtn(btn);
+      setHint('Speech failed — try again.');
+    }
   }
 
-  // ---------- Voice: speech-to-text (voice input) ----------
-  const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
-  let recognition = null;
+  // ---------- Voice: speech-to-text (server: Groq Whisper) ----------
+  let mediaRecorder = null;
+  let mediaStream = null;
+  let audioChunks = [];
 
-  function setHint(msg) {
-    inputEl.placeholder = msg;
-    clearTimeout(hintTimer);
-    hintTimer = setTimeout(() => {
-      inputEl.placeholder = PLACEHOLDER;
-    }, 3200);
+  function isRecording() {
+    return !!(mediaRecorder && mediaRecorder.state === 'recording');
+  }
+
+  function setMicState(state) {
+    micBtn.classList.remove('listening', 'busy');
+
+    if (state === 'recording') {
+      micBtn.classList.add('listening');
+      micBtn.title = 'Recording… click to stop';
+      inputEl.placeholder = 'Recording… click mic to stop';
+    } else if (state === 'busy') {
+      micBtn.classList.add('busy');
+      micBtn.title = 'Transcribing…';
+      inputEl.placeholder = 'Transcribing your voice…';
+    } else {
+      micBtn.title = 'Speak your message';
+      if (!hintActive) inputEl.placeholder = PLACEHOLDER;
+    }
+  }
+
+  async function transcribeBlob(blob) {
+    transcribing = true;
+    setMicState('busy');
+
+    const fd = new FormData();
+    fd.append('file', blob, 'speech.webm');
+
+    try {
+      const res = await fetch('/api/transcribe', { method: 'POST', body: fd });
+      const data = await res.json();
+
+      if (data.ok && data.text) {
+        inputEl.value = data.text;
+        inputEl.dispatchEvent(new Event('input'));
+        inputEl.focus();
+        hintActive = false;
+        inputEl.placeholder = PLACEHOLDER;
+      } else if (res.status === 429) {
+        setHint('Voice limit reached — try again shortly.');
+      } else if (res.status === 400) {
+        setHint('Voice service not configured.');
+      } else {
+        setHint("Couldn't hear clearly — try again.");
+      }
+    } catch (e) {
+      setHint('Transcription failed — check connection.');
+    } finally {
+      transcribing = false;
+      setMicState('idle');
+    }
   }
 
   function stopListening() {
-    if (listening && recognition) {
-      try { recognition.stop(); } catch (e) { /* ignore */ }
+    if (isRecording()) {
+      try { mediaRecorder.stop(); } catch (e) { /* ignore */ }
     }
   }
 
   function initVoiceInput() {
-    if (!SR) {
+    if (!navigator.mediaDevices || !window.MediaRecorder) {
       micBtn.style.display = 'none';
       return;
     }
-    recognition = new SR();
-    recognition.lang = 'en-IN';
-    recognition.interimResults = false;
-    recognition.maxAlternatives = 1;
 
-    recognition.onstart = () => {
-      listening = true;
-      micBtn.classList.add('listening');
-      micBtn.title = 'Listening… click to stop';
-      inputEl.placeholder = 'Listening… speak now';
-      stopSpeaking();
-    };
+    micBtn.addEventListener('click', async () => {
+      if (busy || transcribing) return;
 
-    recognition.onresult = (e) => {
-      const text = (e.results[0][0].transcript || '').trim();
-      if (text) {
-        inputEl.value = text;
-        inputEl.dispatchEvent(new Event('input'));
-        inputEl.focus();
-      }
-    };
-
-    recognition.onerror = (e) => {
-      if (e.error === 'not-allowed' || e.error === 'service-not-allowed') {
-        setHint('Microphone blocked — allow mic access in browser.');
-      } else if (e.error === 'no-speech') {
-        setHint('Didn\'t catch that — please try again.');
-      } else if (e.error !== 'aborted') {
-        setHint('Voice input failed — try again.');
-      }
-    };
-
-    recognition.onend = () => {
-      listening = false;
-      micBtn.classList.remove('listening');
-      micBtn.title = 'Speak your message';
-      if (inputEl.placeholder === 'Listening… speak now') {
-        inputEl.placeholder = PLACEHOLDER;
-      }
-    };
-
-    micBtn.addEventListener('click', () => {
-      if (busy) return;
-      if (listening) {
-        try { recognition.stop(); } catch (e) { /* ignore */ }
+      if (isRecording()) {
+        try { mediaRecorder.stop(); } catch (e) { /* ignore */ }
         return;
       }
+
       stopSpeaking();
-      try { recognition.start(); } catch (e) { /* already started */ }
+
+      try {
+        mediaStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      } catch (e) {
+        setHint('Microphone blocked — allow mic access in browser.');
+        return;
+      }
+
+      audioChunks = [];
+
+      try {
+        mediaRecorder = new MediaRecorder(mediaStream);
+      } catch (e) {
+        mediaStream.getTracks().forEach(t => t.stop());
+        mediaStream = null;
+        setHint('Recording not supported in this browser.');
+        return;
+      }
+
+      mediaRecorder.ondataavailable = (e) => {
+        if (e.data && e.data.size > 0) audioChunks.push(e.data);
+      };
+
+      mediaRecorder.onstop = () => {
+        if (mediaStream) mediaStream.getTracks().forEach(t => t.stop());
+        mediaStream = null;
+        setMicState('idle');
+
+        const type = (mediaRecorder.mimeType || 'audio/webm').split(';')[0];
+        const blob = new Blob(audioChunks, { type });
+        audioChunks = [];
+
+        if (!blob.size || blob.size < 800) {
+          setHint("Didn't catch that — try again.");
+          return;
+        }
+        transcribeBlob(blob);
+      };
+
+      mediaRecorder.start();
+      setMicState('recording');
     });
   }
 
@@ -297,14 +370,12 @@
       });
       actions.appendChild(copyBtn);
 
-      if (hasTTS) {
-        const speakBtn = document.createElement('button');
-        speakBtn.className = 'mini-btn';
-        speakBtn.innerHTML = SPK_ICON + ' Listen';
-        speakBtn.title = 'Read aloud';
-        speakBtn.addEventListener('click', () => speakText(m.content, speakBtn));
-        actions.appendChild(speakBtn);
-      }
+      const speakBtn = document.createElement('button');
+      speakBtn.className = 'mini-btn';
+      speakBtn.innerHTML = SPK_ICON + ' Listen';
+      speakBtn.title = 'Read aloud';
+      speakBtn.addEventListener('click', () => speakText(m.content, speakBtn));
+      actions.appendChild(speakBtn);
 
       if (m.error && i === msgs.length - 1) {
         const retryBtn = document.createElement('button');
@@ -577,10 +648,6 @@
   });
 
   // ---------- Init ----------
-  if (hasTTS) {
-    window.speechSynthesis.getVoices();
-    window.speechSynthesis.onvoiceschanged = () => window.speechSynthesis.getVoices();
-  }
   initVoiceInput();
 
   if (!load()) {

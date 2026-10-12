@@ -367,11 +367,9 @@ button { font-family: inherit; }
   display: flex;
   gap: 6px;
   margin-top: 9px;
-  opacity: 0;
-  transition: opacity 0.15s ease;
+  opacity: 1;
+  flex-wrap: wrap;
 }
-
-.msg:hover .msg-actions { opacity: 1; }
 
 .mini-btn {
   display: inline-flex;
@@ -494,6 +492,13 @@ button { font-family: inherit; }
   background: rgba(229, 72, 77, 0.16);
   border-color: #e5484d;
   color: #ff8b8f;
+  animation: micPulse 1.2s infinite;
+}
+
+.mic-btn.busy {
+  border-color: var(--accent);
+  color: #c9c0ff;
+  cursor: wait;
   animation: micPulse 1.2s infinite;
 }
 
