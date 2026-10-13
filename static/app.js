@@ -21,6 +21,7 @@
   const attachBtn = document.getElementById('attachBtn');
   const fileInput = document.getElementById('fileInput');
   const attachChips = document.getElementById('attachChips');
+  const attachMenu = document.getElementById('attachMenu');
 
   // ---------- Persistence ----------
   const STORE_KEY = 'astra_chats_v1';
@@ -863,8 +864,41 @@
     else send(inputEl.value);
   });
 
-  attachBtn.addEventListener('click', () => {
-    if (!busy) fileInput.click();
+  const ACCEPT = {
+    all: 'image/png,image/jpeg,image/webp,image/gif,.pdf,.docx,.txt,.md,.csv,.json,.log,.py,.js,.html,.css,.xml,.yml,.yaml',
+    image: 'image/png,image/jpeg,image/webp,image/gif',
+    doc: '.pdf,.docx,.txt,.md,.csv,.json,.log,.py,.js,.html,.css,.xml,.yml,.yaml'
+  };
+
+  function openAttachMenu() {
+    attachMenu.style.display = 'block';
+    attachBtn.setAttribute('aria-expanded', 'true');
+  }
+
+  function closeAttachMenu() {
+    attachMenu.style.display = 'none';
+    attachBtn.setAttribute('aria-expanded', 'false');
+  }
+
+  attachBtn.addEventListener('click', (e) => {
+    e.stopPropagation();
+    if (busy) return;
+    if (attachMenu.style.display === 'block') closeAttachMenu();
+    else openAttachMenu();
+  });
+
+  attachMenu.addEventListener('click', (e) => {
+    const item = e.target.closest('.attach-menu-item');
+    if (!item) return;
+    closeAttachMenu();
+    fileInput.accept = ACCEPT[item.dataset.mode] || ACCEPT.all;
+    fileInput.click();
+  });
+
+  document.addEventListener('click', (e) => {
+    if (attachMenu.style.display === 'block' && !attachMenu.contains(e.target) && e.target !== attachBtn) {
+      closeAttachMenu();
+    }
   });
 
   fileInput.addEventListener('change', () => {

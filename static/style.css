@@ -56,43 +56,56 @@ textarea:focus-visible {
 
 .sidebar.hidden { margin-left: calc(-1 * var(--sidebar-w)); }
 
-.side-top { padding: 16px 14px 12px; }
-
-.logo {
-  font-size: 1.1rem;
-  font-weight: 700;
-  letter-spacing: -0.5px;
-  background: linear-gradient(90deg, #b5a9ff, #73d9ff);
-  -webkit-background-clip: text;
-  -webkit-text-fill-color: transparent;
-  padding: 4px 6px 14px;
+.side-top {
+  padding: 10px 10px 6px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
 }
 
 .new-chat-btn {
   width: 100%;
   display: flex;
   align-items: center;
-  gap: 9px;
-  padding: 10px 14px;
-  background: var(--panel-2);
-  border: 1px solid var(--border);
-  border-radius: 12px;
+  gap: 10px;
+  padding: 10px 12px;
+  background: transparent;
+  border: none;
+  border-radius: 10px;
   color: var(--text);
   font-size: 0.88rem;
   font-weight: 500;
   cursor: pointer;
-  transition: all 0.16s ease;
+  transition: background 0.14s ease;
 }
 
-.new-chat-btn:hover { border-color: var(--accent); background: #17223e; }
+.new-chat-btn:hover { background: rgba(148, 163, 184, 0.1); }
+
+.side-nav-btn {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  background: transparent;
+  border: none;
+  border-radius: 10px;
+  color: var(--muted);
+  font-size: 0.85rem;
+  font-weight: 400;
+  cursor: pointer;
+  transition: background 0.14s ease, color 0.14s ease;
+}
+
+.side-nav-btn:hover { background: rgba(148, 163, 184, 0.08); color: var(--text); }
+.side-nav-btn:disabled { opacity: 0.4; cursor: not-allowed; }
 
 .side-label {
   font-size: 0.7rem;
   font-weight: 600;
-  letter-spacing: 0.8px;
-  text-transform: uppercase;
+  letter-spacing: 0.5px;
   color: var(--muted);
-  padding: 12px 20px 6px;
+  padding: 14px 20px 6px;
 }
 
 .chat-list {
@@ -108,7 +121,7 @@ textarea:focus-visible {
   gap: 8px;
   width: 100%;
   padding: 9px 34px 9px 12px;
-  margin-bottom: 2px;
+  margin-bottom: 1px;
   background: transparent;
   border: none;
   border-radius: 10px;
@@ -130,37 +143,16 @@ textarea:focus-visible {
 .chat-item:hover { background: rgba(148, 163, 184, 0.08); color: var(--text); }
 
 .chat-item.active {
-  background: rgba(139, 124, 255, 0.14);
+  background: rgba(148, 163, 184, 0.12);
   color: var(--text);
 }
 
-.side-bottom { padding: 12px 14px 16px; border-top: 1px solid var(--border); }
-
 .side-hint {
-  padding: 4px 20px 10px;
+  padding: 4px 20px 12px;
   font-size: 0.68rem;
   color: var(--muted);
   opacity: 0.8;
 }
-
-.side-action {
-  width: 100%;
-  display: flex;
-  align-items: center;
-  gap: 9px;
-  padding: 9px 12px;
-  background: transparent;
-  border: 1px solid transparent;
-  border-radius: 10px;
-  color: var(--muted);
-  font-size: 0.83rem;
-  cursor: pointer;
-  transition: all 0.15s ease;
-  margin-bottom: 10px;
-}
-
-.side-action:hover { background: rgba(148, 163, 184, 0.08); color: var(--text); }
-.side-action:disabled { opacity: 0.4; cursor: not-allowed; }
 
 /* ---------- Shell / Topbar ---------- */
 .shell {
@@ -441,8 +433,78 @@ textarea:focus-visible {
 
 .attach-chip.loading { opacity: 0.6; pointer-events: none; }
 
+/* ---------- Attach dropdown menu (ChatGPT style) ---------- */
+.attach-wrap {
+  position: relative;
+  flex-shrink: 0;
+}
+
 .attach-btn {
   margin-bottom: 2px;
+}
+
+.attach-menu {
+  position: absolute;
+  bottom: calc(100% + 10px);
+  left: 0;
+  min-width: 280px;
+  background: #1a2236;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  padding: 6px;
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.55);
+  z-index: 60;
+  animation: menuUp 0.16s ease;
+}
+
+@keyframes menuUp {
+  from { opacity: 0; transform: translateY(6px); }
+  to { opacity: 1; transform: none; }
+}
+
+.attach-menu-item {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  padding: 11px 14px;
+  background: transparent;
+  border: none;
+  border-radius: 10px;
+  color: var(--text);
+  cursor: pointer;
+  text-align: left;
+  transition: background 0.12s ease;
+}
+
+.attach-menu-item:hover { background: rgba(148, 163, 184, 0.1); }
+
+.ami-icon {
+  font-size: 1.15rem;
+  width: 28px;
+  text-align: center;
+  flex-shrink: 0;
+}
+
+.ami-text {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+}
+
+.ami-text b {
+  font-size: 0.88rem;
+  font-weight: 500;
+  color: var(--text);
+}
+
+.ami-text small {
+  font-size: 0.76rem;
+  color: var(--muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .composer-wrap {
