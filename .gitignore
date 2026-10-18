@@ -2,5 +2,15 @@ venv/
 venv_old/
 .venv/
 .env
+.env.*
+!.env.example
 __pycache__/
 *.pyc
+.pytest_cache/
+.coverage
+htmlcov/
+uploads/
+*.log
+*.db
+*.sqlite3
+.DS_Store
