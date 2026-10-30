@@ -1,0 +1,351 @@
+﻿<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+<meta name="theme-color" content="#0b1020" />
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>✦</text></svg>" />
+<title>Astra AI | Chatbot</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
+<link rel="stylesheet" href="/static/style.css?v=__VER__" />
+<script>
+/* Anti-flash: set data-theme before CSS renders (reads localStorage, falls back to system) */
+(function () {
+  try {
+    var t = localStorage.getItem('astra_theme') || 'system';
+    if (t === 'system') {
+      t = window.matchMedia && window.matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark';
+    }
+    document.documentElement.setAttribute('data-theme', t === 'light' ? 'light' : 'dark');
+  } catch (e) { /* default dark */ }
+})();
+</script>
+</head>
+<body>
+
+<div id="overlay" class="overlay"></div>
+
+<div id="ctxMenu" class="ctx-menu" style="display:none">
+  <button id="ctxRename" class="ctx-item">✏️ Rename chat</button>
+  <button id="ctxDelete" class="ctx-item">🗑 Delete chat</button>
+</div>
+
+<aside id="sidebar" class="sidebar">
+  <div class="side-top">
+    <button id="newChatBtn" class="new-chat-btn" aria-label="New chat">
+      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
+      New chat
+    </button>
+    <button id="exportBtn" class="side-nav-btn" aria-label="Export chat">
+      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+      Export chat
+    </button>
+  </div>
+
+  <div class="side-label">Recents</div>
+  <input id="chatSearch" class="chat-search" type="search" placeholder="Search chats…" style="display:none" aria-label="Search chats" />
+  <nav id="chatList" class="chat-list"></nav>
+  <div class="side-hint">Right-click a chat to delete</div>
+
+  <div class="side-bottom">
+    <button id="accountBtn" class="account-btn" aria-label="Memory &amp; data">
+      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
+      <span id="accountBtnLabel">Guest</span>
+    </button>
+  </div>
+</aside>
+
+<div class="shell">
+  <header class="topbar">
+    <button id="menuBtn" class="icon-btn" title="Toggle sidebar" aria-label="Toggle sidebar">
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M3 6h18M3 12h18M3 18h18"/></svg>
+    </button>
+    <div class="topbar-title">Astra AI</div>
+    <div class="topbar-modes">
+      <button id="themeToggleBtn" class="icon-btn theme-toggle" title="Toggle theme (dark / light)" aria-label="Toggle theme">
+        <svg class="theme-icon-dark" width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
+        <svg class="theme-icon-light" width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="display:none"><circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/></svg>
+      </button>
+      <button id="settingsBtn" class="icon-btn" title="Settings" aria-label="Open settings">
+        <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+      </button>
+    </div>
+  </header>
+
+  <main id="scrollArea" class="scroll-area">
+    <div id="emptyState" class="empty-state">
+      <div class="welcome-brand" aria-hidden="true">
+        <svg class="welcome-logo" width="52" height="52" viewBox="0 0 48 48" fill="none" xmlns="http://www.w3.org/2000/svg">
+          <defs>
+            <linearGradient id="wg" x1="0" y1="0" x2="48" y2="48">
+              <stop offset="0%" stop-color="#7c6cf0"/>
+              <stop offset="100%" stop-color="#5bb8f5"/>
+            </linearGradient>
+          </defs>
+          <rect width="48" height="48" rx="14" fill="url(#wg)" opacity="0.12"/>
+          <path d="M24 8 L28.5 19.5 L40 24 L28.5 28.5 L24 40 L19.5 28.5 L8 24 L19.5 19.5 Z" fill="url(#wg)"/>
+        </svg>
+      </div>
+      <div class="greet">What can we explore today?</div>
+      <p class="welcome-sub">I can help you learn, code, write, research and reason through complex problems.</p>
+      <div class="suggestions" role="group" aria-label="Starter prompts">
+        <button class="sugg" data-prompt="Explain a Python concept with a simple example and why it matters.">
+          <span class="sugg-icon" aria-hidden="true">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"/><path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"/></svg>
+          </span>
+          <b>Learn something</b>
+          <span>Explain a Python concept with a simple example</span>
+        </button>
+        <button class="sugg" data-prompt="Help me create a clean responsive web application. Start by asking what I want to build.">
+          <span class="sugg-icon" aria-hidden="true">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/></svg>
+          </span>
+          <b>Build something</b>
+          <span>Create a clean responsive web application</span>
+        </button>
+        <button class="sugg" data-prompt="Explain an AI concept in beginner-friendly language with a real-world analogy.">
+          <span class="sugg-icon" aria-hidden="true">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2a7 7 0 0 1 7 7c0 2.38-1.19 4.47-3 5.74V17a1 1 0 0 1-1 1h-6a1 1 0 0 1-1-1v-2.26C6.19 13.47 5 11.38 5 9a7 7 0 0 1 7-7z"/><line x1="9" y1="21" x2="15" y2="21"/></svg>
+          </span>
+          <b>Explore AI</b>
+          <span>Explain an AI concept with a real-world analogy</span>
+        </button>
+        <button class="sugg" data-prompt="Help me investigate a topic and identify reliable sources. Ask what topic I want to research.">
+          <span class="sugg-icon" aria-hidden="true">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+          </span>
+          <b>Research a topic</b>
+          <span>Investigate a topic and find reliable sources</span>
+        </button>
+      </div>
+    </div>
+    <div id="messages" class="messages"></div>
+  </main>
+
+  <footer class="composer-wrap">
+    <div id="docsStrip" class="docs-strip" style="display:none"></div>
+    <div id="attachChips" class="attach-chips" style="display:none"></div>
+
+    <div class="composer">
+      <div class="attach-wrap">
+        <button id="attachBtn" class="icon-btn attach-btn" title="Attach file" aria-label="Attach file" aria-haspopup="true" aria-expanded="false">
+          <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m21.44 11.05-9.19 9.19a6 6 0 0 1-8.49-8.49l8.57-8.57A4 4 0 1 1 18 8.84l-8.59 8.57a2 2 0 0 1-2.83-2.83l8.49-8.48"/></svg>
+        </button>
+        <div id="attachMenu" class="attach-menu" style="display:none">
+          <button class="attach-menu-item" data-mode="all">
+            <span class="ami-icon">📎</span>
+            <span class="ami-text">
+              <b>Add photos & files</b>
+              <small>Upload from computer</small>
+            </span>
+          </button>
+          <button class="attach-menu-item" data-mode="image">
+            <span class="ami-icon">🖼️</span>
+            <span class="ami-text">
+              <b>Add photo</b>
+              <small>Images only (PNG, JPG, WebP)</small>
+            </span>
+          </button>
+          <button class="attach-menu-item" data-mode="doc">
+            <span class="ami-icon">📄</span>
+            <span class="ami-text">
+              <b>Add document</b>
+              <small>PDF, DOCX, TXT, code files</small>
+            </span>
+          </button>
+        </div>
+      </div>
+      <input type="file" id="fileInput" multiple accept="image/png,image/jpeg,image/webp,image/gif,.pdf,.docx,.txt,.md,.csv,.json,.log,.py,.js,.html,.css,.xml,.yml,.yaml" style="display:none" />
+      <textarea id="input" rows="1" placeholder="Message Astra AI..." spellcheck="false" autocomplete="off" autocapitalize="sentences" aria-label="Message input"></textarea>
+      <button id="micBtn" class="mic-btn" title="Speak your message" aria-label="Speak your message">
+        <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" y1="19" x2="12" y2="23"/><line x1="8" y1="23" x2="16" y2="23"/></svg>
+      </button>
+      <button id="sendBtn" class="send-btn" title="Send" aria-label="Send message">
+        <svg id="sendIcon" width="17" height="17" viewBox="0 0 24 24" fill="currentColor"><path d="M3.4 20.4l17.4-7.5c.8-.4.8-1.5 0-1.8L3.4 3.6c-.7-.3-1.4.4-1.2 1.1L4.5 11c.1.4.5.7.9.7l7.6.8-7.6.8c-.4 0-.8.3-.9.7l-2.3 6.3c-.2.7.5 1.4 1.2 1.1z"/></svg>
+        <svg id="stopIcon" width="15" height="15" viewBox="0 0 24 24" fill="currentColor" style="display:none"><rect x="5" y="5" width="14" height="14" rx="2.5"/></svg>
+      </button>
+    </div>
+  </footer>
+</div>
+
+<!-- Settings modal (Phase 8) -->
+<div id="settingsModal" class="modal-overlay" style="display:none">
+  <div class="modal" role="dialog" aria-modal="true" aria-labelledby="settingsTitle">
+    <div class="modal-head">
+      <h3 id="settingsTitle">Settings</h3>
+      <button class="modal-close" id="settingsClose" aria-label="Close settings">✕</button>
+    </div>
+
+    <!-- Appearance -->
+    <div class="mem-section">
+      <div class="settings-section-head">
+        <b>Appearance</b>
+        <span class="settings-badge local">Local</span>
+      </div>
+      <p class="mem-desc">Theme applies instantly and is remembered on this device. System follows your OS setting.</p>
+      <div class="seg-control" role="radiogroup" aria-label="Theme">
+        <button class="seg-btn active" data-theme="dark" role="radio" aria-checked="true">Dark</button>
+        <button class="seg-btn" data-theme="light" role="radio" aria-checked="false">Light</button>
+        <button class="seg-btn" data-theme="system" role="radio" aria-checked="false">System</button>
+      </div>
+    </div>
+
+    <!-- AI -->
+    <div class="mem-section">
+      <div class="settings-section-head">
+        <b>AI</b>
+        <span class="settings-badge local">Local</span>
+      </div>
+      <p class="mem-desc">Choose how Astra responds. Mode is sent with each request.</p>
+      <div class="settings-field">
+        <label class="settings-label" for="settingsModelMode">Response mode</label>
+        <select id="settingsModelMode" class="settings-select" aria-label="AI response mode">
+          <option value="auto">Auto — pick the best model</option>
+          <option value="fast">Fast — quick answers</option>
+          <option value="reasoning">Reasoning — deeper thinking</option>
+        </select>
+      </div>
+      <div class="settings-field">
+        <label class="settings-label" for="replyLang">Response language</label>
+        <select id="replyLang" class="settings-select" aria-label="Response language">
+          <option value="auto">Auto-detect</option>
+          <option value="English">English</option>
+          <option value="Hindi">हिन्दी (Hindi)</option>
+          <option value="Hinglish">Hinglish</option>
+          <option value="Urdu">اردو (Urdu)</option>
+          <option value="Spanish">Español</option>
+          <option value="French">Français</option>
+          <option value="German">Deutsch</option>
+          <option value="Japanese">日本語</option>
+          <option value="Chinese">中文</option>
+          <option value="Arabic">العربية</option>
+        </select>
+      </div>
+    </div>
+
+    <!-- Web search (hidden when search unavailable) -->
+    <div class="mem-section" id="settingsSearchSection">
+      <div class="settings-section-head">
+        <b>Web search</b>
+        <span class="settings-badge local">Local</span>
+      </div>
+      <p class="mem-desc">Let Astra look things up online while answering.</p>
+      <select id="webSearchMode" class="settings-select" title="Web search" aria-label="Web search mode">
+        <option value="auto">Auto search</option>
+        <option value="always">Always search</option>
+        <option value="never">No search</option>
+      </select>
+    </div>
+
+    <!-- Voice -->
+    <div class="mem-section">
+      <div class="settings-section-head">
+        <b>Voice</b>
+        <span class="settings-badge local">Local</span>
+      </div>
+      <p class="mem-desc">Speech input &amp; read-aloud language. Auto picks the best voice for the text.</p>
+      <div class="settings-field">
+        <label class="settings-label" for="voiceLang">Voice language</label>
+        <select id="voiceLang" class="settings-select" title="Voice language (speech input &amp; output)" aria-label="Voice language">
+          <option value="auto">Auto — detect from text</option>
+          <option value="en">English</option>
+          <option value="hi">हिन्दी (Hindi)</option>
+          <option value="fr">Français</option>
+          <option value="de">Deutsch</option>
+          <option value="es">Español</option>
+          <option value="ja">日本語</option>
+          <option value="zh">中文</option>
+          <option value="ar">العربية</option>
+        </select>
+      </div>
+      <div class="mem-row" style="margin-top:10px">
+        <div>
+          <b>Auto-read replies</b>
+          <p class="mem-desc">Speak each reply aloud automatically. Click Listen on any message to pause/resume.</p>
+        </div>
+        <label class="switch">
+          <input type="checkbox" id="autoSpeakToggle" aria-label="Auto-read replies" />
+          <span class="slider"></span>
+        </label>
+      </div>
+    </div>
+
+    <!-- Privacy & data -->
+    <div class="mem-section">
+      <div class="settings-section-head">
+        <b>Privacy &amp; data</b>
+      </div>
+      <p class="mem-desc">Memory, chat history and data controls for this device. No account needed.</p>
+      <button class="btn-small" id="settingsMemBtn">Open memory &amp; data…</button>
+    </div>
+  </div>
+</div>
+
+<!-- Settings toast -->
+<div id="settingsToast" class="settings-toast" style="display:none">
+  <span id="settingsToastIcon">✓</span>
+  <span id="settingsToastText">Saved</span>
+</div>
+
+<!-- Memory & data modal -->
+<div id="memModal" class="modal-overlay" style="display:none">
+  <div class="modal modal-wide" role="dialog" aria-modal="true" aria-labelledby="memTitle">
+    <div class="modal-head">
+      <h3 id="memTitle">Memory &amp; data</h3>
+      <button class="modal-close" id="memClose" aria-label="Close">✕</button>
+    </div>
+
+    <div class="mem-section">
+      <div class="mem-row">
+        <div>
+          <b>Long-term memory</b>
+          <p class="mem-desc">Let Astra remember approved facts to personalise replies.</p>
+        </div>
+        <label class="switch">
+          <input type="checkbox" id="memToggle" />
+          <span class="slider"></span>
+        </label>
+      </div>
+    </div>
+
+    <div class="mem-section" id="memPendingSection" style="display:none">
+      <b>Suggestions waiting for your approval</b>
+      <p class="mem-desc">Nothing is saved until you approve it.</p>
+      <ul id="memPendingList" class="mem-list"></ul>
+    </div>
+
+    <div class="mem-section">
+      <b>Saved memories</b>
+      <ul id="memActiveList" class="mem-list"></ul>
+      <div class="mem-add">
+        <input id="memNewInput" type="text" placeholder="Add a memory (e.g. I prefer dark mode)" maxlength="2000" />
+        <button class="btn-small" id="memAddBtn">Add</button>
+      </div>
+    </div>
+
+    <div class="mem-section mem-danger">
+      <b>Your data</b>
+      <div class="mem-actions">
+        <button class="btn-small danger" id="clearChatsBtn">Delete all chats</button>
+        <button class="btn-small danger" id="clearMemoriesBtn">Delete all memories</button>
+      </div>
+      <div id="memAccountError" class="auth-error" style="display:none"></div>
+    </div>
+
+    <div class="mem-footer">
+      <span id="memUserEmail">Guest · this device</span>
+    </div>
+  </div>
+</div>
+
+<!-- Memory suggestion toast -->
+<div id="memToast" class="mem-toast" style="display:none">
+  <span id="memToastText">Astra can remember a few things from this chat.</span>
+  <button class="btn-small" id="memToastReview">Review</button>
+  <button class="mem-toast-x" id="memToastClose" aria-label="Dismiss">✕</button>
+</div>
+
+<script src="/static/app.js?v=__VER__"></script>
+</body>
+</html>
