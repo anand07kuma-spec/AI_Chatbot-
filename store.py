@@ -3,6 +3,8 @@
 Backends:
 - SupabaseStore — PostgREST over HTTPS using the service-role key. Used when
   SUPABASE_URL + SUPABASE_SERVICE_ROLE_KEY are configured (production/dev).
+  The service-role key has full admin privileges and MUST NEVER be sent to the
+  browser. This backend runs exclusively on the server (FastAPI).
 - MemoryStore — thread-safe in-process dicts. Used when Supabase is not
   configured or ASTRA_STORE=memory (tests, offline development).
 
@@ -15,6 +17,8 @@ Data model (Supabase tables, text PKs — see README / SQL in repo docs):
 Identity: the browser keeps a generated UUID in localStorage and sends it as
 an X-Device-Id header. Every query is scoped by that device id — there is no
 user table, no cookie and no login. Rows of other devices are never readable.
+The device_id is NEVER trusted from client input; the server always derives it
+from the X-Device-Id request header (see device.py).
 
 NOTE: values in this module are secrets-free by design — API keys are only
 read from env, never logged or returned.
@@ -35,6 +39,7 @@ load_dotenv()
 
 logger = logging.getLogger("astra.store")
 
+from rag import DocStore, Chunk, valid_conversation_id
 _SERVICE_TIMEOUT = 10.0
 _LIST_LIMIT = 200
 _MSG_FETCH_LIMIT = 5000

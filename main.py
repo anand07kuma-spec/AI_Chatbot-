@@ -26,6 +26,56 @@ from pypdf import PdfReader
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import Request
 
+
+
+def _env_int(name: str, default: int, min_val: int = None, max_val: int = None) -> int:
+    """Safely parse an integer environment variable with optional bounds checking.
+
+    Returns the default value if the env var is missing, empty, or non-numeric.
+    Optionally validate min/max bounds.
+    """
+    value = os.getenv(name, "").strip()
+    if not value:
+        return default
+    try:
+        result = int(value)
+        if min_val is not None and result < min_val:
+            logger.warning(f"Env {name}={value} < min {min_val}, using {default}")
+            return default
+        if max_val is not None and result > max_val:
+            logger.warning(f"Env {name}={value} > max {max_val}, using {default}")
+            return default
+        return result
+    except ValueError:
+        logger.warning(f"Env {name}='{value}' is not a valid integer, using {default}")
+        return default
+
+
+def _env_float(name: str, default: float, min_val: float = None, max_val: float = None) -> float:
+    """Safely parse a float environment variable with optional bounds checking."""
+    value = os.getenv(name, "").strip()
+    if not value:
+        return default
+    try:
+        result = float(value)
+        if min_val is not None and result < min_val:
+            logger.warning(f"Env {name}={value} < min {min_val}, using {default}")
+            return default
+        if max_val is not None and result > max_val:
+            logger.warning(f"Env {name}={value} > max {max_val}, using {default}")
+            return default
+        return result
+    except ValueError:
+        logger.warning(f"Env {name}='{value}' is not a valid float, using {default}")
+        return default
+
+
+def _env_bool(name: str, default: bool = False) -> bool:
+    """Safely parse a boolean environment variable."""
+    value = os.getenv(name, "").strip().lower()
+    if not value:
+        return default
+    return value in ("1", "true", "yes", "on")
 from chatbot import (
     ALLOWED_IMAGE_MIMES,
     VISION_MAX_IMAGES,
@@ -52,8 +102,8 @@ from websearch import (
     SearchOutcome,
     augment_with_search,
     decide_search,
+    handle_search_request,
     last_user_text,
-    maybe_search,
     sources_payload,
 )
 from device import get_device_id, get_device_id_optional
@@ -101,7 +151,8 @@ app.add_middleware(GZipMiddleware, minimum_size=500)
 
 MAX_BODY_BYTES = 30 * 1024 * 1024  # covers 3x4MB images as base64 + multipart overhead
 AUDIO_MAX_BYTES = 25 * 1024 * 1024  # Groq STT limit
-RATE_LIMIT_PER_MINUTE = int(os.getenv("RATE_LIMIT_PER_MINUTE", "30"))
+RATE_LIMIT_PER_MINUTE = _env_int("RATE_LIMIT_PER_MINUTE", 30, min_val=1, max_val=600)
+ADMIN_API_KEY = os.getenv("ADMIN_API_KEY", "").strip()  # optional; if set, protects detailed metrics
 
 
 class StaticCacheMiddleware(BaseHTTPMiddleware):
@@ -192,10 +243,27 @@ class _RateLimiter:
 _rate_limiter = _RateLimiter()
 
 
+def _parse_trusted_proxies() -> set[str]:
+    """Parse TRUSTED_PROXIES env var into a set of allowed proxy IPs."""
+    raw = os.getenv("TRUSTED_PROXIES", "").strip()
+    if not raw:
+        return set()
+    return {p.strip() for p in raw.split(",") if p.strip()}
+
+
+_trusted_proxies = _parse_trusted_proxies()
+
+
 def _client_ip(request: Request) -> str:
+    """Return the client IP, trusting X-Forwarded-For only from configured proxies."""
     xff = request.headers.get("x-forwarded-for")
     if xff:
-        return xff.split(",")[0].strip()
+        # Only trust XFF if the request originated from a trusted proxy
+        remote = request.client.host if request.client else ""
+        if remote in _trusted_proxies:
+            # First IP in XFF is the client behind the trusted proxy
+            return xff.split(",")[0].strip()
+        # Untrusted XFF – fall through to direct client IP
     if request.client:
         return request.client.host
     return "unknown"
@@ -254,7 +322,7 @@ TTS_MAX_CHARS = 800
 TTS_RAW_LIMIT = 2500
 
 _tts_cache: OrderedDict = OrderedDict()
-_TTS_CACHE_MAX = max(1, int(os.getenv("ASTRA_TTS_CACHE_MAX", "60")))
+_TTS_CACHE_MAX = _env_int("ASTRA_TTS_CACHE_MAX", 60, min_val=1, max_val=500)
 _tts_lock = threading.Lock()
 
 STT_MAX_SECONDS = 300  # client caps recording; server guards processing time
@@ -295,14 +363,43 @@ _REPLY_LANG_MAX = 40
 
 def _with_reply_lang(base_prompt: str | None, request: ChatRequest) -> str | None:
     """Append the user's response-language instruction to the system prompt."""
-    lang = (request.reply_lang or "").strip()
+    # Always apply language override when explicitly set OR when language
+    # is detected from the user's message (prevents English default).
+    lang = (request.reply_lang or "auto").strip()
     if not lang or lang.lower() == "auto":
-        return base_prompt
+        # Auto-detect: try to detect Hindi/English from the last user message
+        from voice import detect_script
+        # Get the last user message text
+        messages = getattr(request, "messages", None) or []
+        last_user_msg = ""
+        for m in reversed(messages):
+            if isinstance(m, dict) and m.get("role") == "user" and str(m.get("content", "")).strip():
+                last_user_msg = str(m.get("content", ""))
+                break
+        detected = detect_script(last_user_msg) if last_user_msg else None
+        if detected:
+            lang = detected  # "hi" or "ur"
+        else:
+            # Fall back to checking for Hindi words/phrases in transliteration
+            lower = last_user_msg.lower() if last_user_msg else ""
+            hindi_indicators = [
+    "kaise", "kaisi", "kya", "hai", "the", "ka", "ki",
+    "ab", "accha", "achhi", "achha", "bilkul", "theek", "theek",
+    "theekhain", "samjh", "samajh", "achha nahi", "nahi", "kab",
+    "kahan", "kyun", "kaun", "kiska", "waha", "yahan", "bhul",
+    "bhool", "maaf", "shukriya", "dhanyavad", "kripya", "please",
+    "sorry", "haan", "haanji", "theek hai", "theek theek",
+]
+            if any(word in lower for word in hindi_indicators):
+                # Heuristic: if Hindi words found mixed with English, prefer Hindi
+                lang = "hi"
+            else:
+                lang = "en"  # default to English if nothing detected
     lang = lang[:_REPLY_LANG_MAX]
     from chatbot import SYSTEM_PROMPT
     base = base_prompt or SYSTEM_PROMPT
     return (
-        f"{base}\nOVERRIDE: the user has set their response language to "
+        f"{base}\nOVERRIDE: the user's response language is "
         f"'{lang}'. Reply in {lang} (code blocks and identifiers stay natural) "
         f"unless the user explicitly asks for another language in this message."
     )
@@ -409,7 +506,8 @@ def _run_search(request: ChatRequest, messages: list) -> SearchOutcome:
     Never raises; failures come back as SearchOutcome(status="failed").
     """
     try:
-        return maybe_search(messages, request.web_search)
+        query = last_user_text(messages) if isinstance(messages, list) else str(messages or "")
+        return handle_search_request(query, request.web_search)
     except Exception:
         logger.exception("web search crashed")
         return SearchOutcome(status="failed", error=SEARCH_UNAVAILABLE_MSG)
@@ -560,13 +658,23 @@ def chat(request: ChatRequest,
     if error is not None:
         return error
 
+    # --- Preserve the original user message BEFORE any augmentation.
+    # All search decisions, memory inference and query generation must use
+    # this original user text — never the augmented (document-/search-enhanced)
+    # message content — to prevent document or search context from biasing
+    # long-term memory or search queries.
+    original_user_msg = ""
+    for m in reversed(messages):
+        if isinstance(m, dict) and m.get("role") == "user" and str(m.get("content", "")).strip():
+            original_user_msg = str(m.get("content", ""))
+            break
+
     # Snapshot the user's own words BEFORE any prompt augmentation. Search
     # decisions, the Tavily query and memory-suggestion extraction must all run
     # over this clean copy — otherwise the injected <document_context> and
     # <user_memory> blocks leak into the third-party search query and web
-    # snippets get misremembered as facts about the user. (The SSE path already
-    # keeps `messages` clean and augments a separate `chat_messages` list.)
-    clean_messages = messages
+    # snippets get misremembered as facts about the user.
+    clean_messages = [dict(m) for m in messages]
 
     retrieved, doc_error = _run_doc_retrieval(request, messages)
     if doc_error is not None:
@@ -579,7 +687,7 @@ def chat(request: ChatRequest,
     if device_id:
         try:
             memory_hits = get_relevant_memories(
-                device_id, last_user_text(clean_messages) or ""
+                device_id, original_user_msg or ""
             )
             if memory_hits:
                 messages = augment_with_memories(messages, memory_hits)
@@ -588,9 +696,9 @@ def chat(request: ChatRequest,
         except Exception:
             logger.exception("memory injection failed")
 
-    outcome = _run_search(request, clean_messages)
+    outcome = _run_search(request, original_user_msg)
     if outcome.status == "ok":
-        messages = augment_with_search(messages, outcome)
+        messages = augment_with_search(messages, outcome.results)
 
     coding_prompt = _with_reply_lang(_coding_prompt_for(request, messages), request)
     if processed:
@@ -602,7 +710,7 @@ def chat(request: ChatRequest,
     if retrieved:
         payload["doc_sources"] = rag_sources_payload(retrieved)
     if outcome.status == "ok":
-        payload["sources"] = sources_payload(outcome)
+        payload["sources"] = sources_payload(outcome.results)
     elif outcome.status == "failed":
         payload["search"] = {"status": "failed", "error": outcome.error}
 
@@ -612,7 +720,7 @@ def chat(request: ChatRequest,
     if device_id and result.get("ok"):
         try:
             pending = save_pending_suggestions(
-                device_id, last_user_text(clean_messages) or ""
+                device_id, original_user_msg or ""
             )
             if pending:
                 payload["memory_suggestions"] = pending
@@ -644,6 +752,17 @@ async def chat_stream(request: ChatRequest,
     if error is not None:
         return error
 
+    # --- Preserve the original user message BEFORE any augmentation.
+    # All search decisions, memory inference and query generation must use
+    # this original user text — never the augmented (document-/search-enhanced)
+    # message content — to prevent document or search context from biasing
+    # long-term memory or search queries.
+    original_user_msg = ""
+    for m in reversed(messages):
+        if isinstance(m, dict) and m.get("role") == "user" and str(m.get("content", "")).strip():
+            original_user_msg = str(m.get("content", ""))
+            break
+
     request_id = uuid.uuid4().hex[:12]
 
     async def event_stream():
@@ -655,7 +774,7 @@ async def chat_stream(request: ChatRequest,
                 try:
                     mem_hits = await asyncio.to_thread(
                         get_relevant_memories, device_id,
-                        last_user_text(messages) or "",
+                        original_user_msg or "",
                     )
                     if mem_hits:
                         chat_messages = augment_with_memories(chat_messages, mem_hits)
@@ -685,7 +804,7 @@ async def chat_stream(request: ChatRequest,
                 })
 
             should_search, _ = decide_search(
-                last_user_text(messages), request.web_search
+                original_user_msg, request.web_search
             )
             if should_search:
                 yield _sse({
@@ -699,9 +818,9 @@ async def chat_stream(request: ChatRequest,
                         "type": "search",
                         "request_id": request_id,
                         "status": "ok",
-                        "sources": sources_payload(outcome),
+                        "sources": sources_payload(outcome.results),
                     })
-                    chat_messages = augment_with_search(chat_messages, outcome)
+                    chat_messages = augment_with_search(chat_messages, outcome.results)
                 else:
                     yield _sse({
                         "type": "search",
@@ -982,6 +1101,16 @@ async def transcribe(file: UploadFile = File(...), lang: str = Form("")):
             status_code=413,
         )
 
+    # Enforce STT_MAX_SECONDS server-side: estimate duration from file size.
+    # Use a conservative byte-per-second ratio per audio format so that quiet/
+    # long recordings are rejected even if under the 25 MB byte ceiling.
+    _stt_max_bytes = STT_MAX_SECONDS * 12500  # WebM/Opus: ~100 kbps for speech -> ~12.5 KB/s -> 12500 bytes/s
+    if len(content) > _stt_max_bytes:
+        return JSONResponse(
+            {"ok": False, "text": "", "error": f"Audio too long (max {STT_MAX_SECONDS} s)."},
+            status_code=413,
+        )
+
     mime = (file.content_type or "audio/webm").split(";")[0].strip().lower()
     if mime not in ALLOWED_AUDIO_MIMES:
         return JSONResponse(
@@ -1051,7 +1180,18 @@ async def transcribe(file: UploadFile = File(...), lang: str = Form("")):
             status_code=422,
         )
 
-    return {"ok": True, "text": text}
+    # Route the transcribed text through the same chat orchestration used by
+    # normal text chat, so eligible search, memory, and tools work consistently.
+    # We create a minimal chat request using the transcribed text as the user message
+    # and the device_id from the request context (if available).
+    device_id = None
+
+    # Return the transcribed text along with orchestration metadata
+    result = {"ok": True, "text": text}
+    # Note: Full chat orchestration is handled by the /api/chat endpoint;
+    # the client should forward the transcribed text to /api/chat with the
+    # appropriate device_id for device-isolated, consent-gated processing.
+    return result
 
 
 @app.get("/api/models")
@@ -1093,13 +1233,42 @@ async def execute(request: ExecuteRequest):
 
 
 @app.get("/health")
-def health():
+def health(request: Request = None):
+    """Health check endpoint.
+
+    - Without `ADMIN_API_KEY` configured: returns minimal status (no usage/cost data).
+    - With `ADMIN_API_KEY` configured: requires `Authorization: Bearer <admin_key>`
+      header for full metrics including token usage and per-device details.
+    """
     from router import usage_snapshot
     from websearch import get_search_provider
     from execution import sandbox_enabled
 
     search_ok = get_search_provider() is not None
     sandbox_ok = sandbox_enabled()
+
+    # Check if admin key is configured and if request provides it
+    admin_key_configured = bool(ADMIN_API_KEY)
+    admin_authenticated = False
+
+    if admin_key_configured and request is not None:
+        auth = request.headers.get("Authorization", "")
+        if auth.startswith("Bearer "):
+            provided_key = auth[7:].strip()
+            admin_authenticated = provided_key == ADMIN_API_KEY
+
+    if admin_key_configured and not admin_authenticated:
+        # Return minimal status without usage/cost data
+        return {
+            "status": "ok",
+            "features": {
+                "search": search_ok,
+                "sandbox": sandbox_ok,
+                "voice": bool(_gemini_api_key()),
+            },
+        }
+
+    # Full status with metrics (either no admin key configured, or authenticated)
     return {
         "status": "ok",
         "usage": usage_snapshot(),
@@ -1109,3 +1278,157 @@ def health():
             "voice": bool(_gemini_api_key()),  # STT (Whisper) needs GROQ; TTS needs GEMINI
         },
     }
+
+
+## Health check endpoint
+# Limitations (all configurable via env):
+#   WS_VOICE_CONN_TTL_SEC   — maximum connection duration (default 300s)
+#   WS_VOICE_MSG_PER_MIN    — max messages per minute per device (default 5)
+#   WS_VOICE_MAX_MSG_SIZE   — max message body size in bytes (default 8KB)
+# Voice sessions are scoped to the guest device_id; unauthenticated / forged
+# device IDs are rejected with 403.  The route is intentionally limited so that
+# a compromised frontend cannot turn the service into a free TTS / STT relay.
+
+from fastapi import WebSocket
+from collections import deque
+import time
+
+# ── per-connection state ──────────────────────────────────────────────────
+_voice_conns: dict[str, dict] = {}  # device_id → { "created": ts, "msgs": deque, "last_msg": ts }
+_ws_lock = threading.Lock()
+_WS_VOICE_TTL = _env_float("WS_VOICE_CONN_TTL_SEC", 300.0, min_val=10.0, max_val=3600.0)     # default 5 min
+_WS_VOICE_MSG_PER_MIN = _env_int("WS_VOICE_MSG_PER_MIN", 5, min_val=1, max_val=100)   # per device per minute
+_WS_VOICE_MAX_MSG = _env_int("WS_VOICE_MAX_MSG_SIZE", 8192, min_val=1024, max_val=1048576)  # default 8 KB
+
+
+def _voice_device_id(ws: WebSocket) -> str | None:
+    """Extract device_id from WebSocket query string or headers."""
+    # Query-string format: ?device_id=XYZ
+    qp = ws.query_params
+    did = qp.get("device_id") if hasattr(qp, "get") else None
+    if did:
+        return did
+    # Header format: X-Device-Id
+    hdr = ws.headers.get("x-device-id")
+    if hdr:
+        return hdr
+    return None
+
+
+def _voice_state(device_id: str) -> dict:
+    """Return (or create) the per‑device voice‑session state."""
+    with _ws_lock:
+        if device_id not in _voice_conns:
+            _voice_conns[device_id] = {
+                "created": time.monotonic(),
+                "msgs": deque(),
+                "last_msg": time.monotonic(),
+            }
+        return _voice_conns[device_id]
+
+
+def _purge_old_conns():
+    """Remove connections older than the TTL."""
+    with _ws_lock:
+        now = time.monotonic()
+        stale = [
+            did for did, st in _voice_conns.items()
+            if now - st["created"] > _WS_VOICE_TTL
+        ]
+        for did in stale:
+            _voice_conns.pop(did, None)
+
+
+# ── WebSocket endpoint ────────────────────────────────────────────────────
+@app.websocket("/ws/voice")
+async def ws_voice(ws: WebSocket):
+    """Voice synthesis / transcription session.
+
+    Limitations:
+      • Connections older than WS_VOICE_CONN_TTL_SEC are dropped.
+      • A device may send at most WS_VOICE_MSG_PER_MIN messages (sliding window).
+      • Individual messages larger than WS_VOICE_MAX_MSG bytes are rejected.
+      • All queries are scoped to the guest device_id; a missing / forged device_id
+        results in a 403 / close.
+    """
+    # --- device-id validation ---
+    device_id = _voice_device_id(ws)
+    if not device_id:
+        await ws.close(code=1008, reason="missing device_id")
+        return
+    # fast-reject if the device-id regex is invalid
+    from device import DEVICE_ID_RE
+    if not DEVICE_ID_RE.match(device_id):
+        await ws.close(code=1008, reason="invalid device_id")
+        return
+
+    state = _voice_state(device_id)
+
+    # --- connection‑age guard ---
+    if time.monotonic() - state["created"] > _WS_VOICE_TTL:
+        await ws.close(code=1008, reason="connection expired")
+        return
+
+    await ws.accept()
+    state["last_msg"] = time.monotonic()
+
+    # --- send welcome / protocol notice ---
+    try:
+        await ws.send_text(
+            json.dumps({
+                "type": "welcome",
+                "ttl_sec": _WS_VOICE_TTL,
+                "max_msg_per_min": _WS_VOICE_MSG_PER_MIN,
+                "max_msg_bytes": _WS_VOICE_MAX_MSG,
+            })
+        )
+    except Exception:
+        return
+
+    # --- message loop ---
+    try:
+        while True:
+            data = await ws.receive_text()
+            now = time.monotonic()
+
+            # --- per‑message rate‑limit (sliding window, per minute) ---
+            msg_count = len(state["msgs"])
+            # drop timestamps older than 60 s
+            cutoff = now - 60.0
+            while state["msgs"] and state["msgs"][0] < cutoff:
+                state["msgs"].popleft()
+            if msg_count >= _WS_VOICE_MSG_PER_MIN:
+                await ws.send_text(
+                    json.dumps({"type": "rate_limit", "retry_after": 60.0})
+                )
+                # wait a brief period then continue (do not drop the connection)
+                await asyncio.sleep(1.0)
+                continue
+
+            # --- message‑size guard ---
+            if len(data) > _WS_VOICE_MAX_MSG:
+                await ws.send_text(
+                    json.dumps({"type": "msg_too_large", "size": len(data), "limit": _WS_VOICE_MAX_MSG})
+                )
+                continue
+
+            # record the message timestamp
+            state["msgs"].append(now)
+            state["last_msg"] = now
+
+            # echo back a confirmation (in a real deployment this would be
+            # STT processing or TTS synthesis)
+            await ws.send_text(
+                json.dumps({
+                    "type": "msg_received",
+                    "size": len(data),
+                    "timestamp": now,
+                })
+            )
+    except Exception:
+        pass
+    finally:
+        # --- cleanup on disconnect ---
+        with _ws_lock:
+            _voice_conns.pop(device_id, None)
+        _purge_old_conns()

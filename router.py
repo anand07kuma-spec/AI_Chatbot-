@@ -182,7 +182,11 @@ def build_vision_payload(
 ) -> dict:
     api_messages = [{"role": "system", "content": system_prompt}]
     for m in messages[:-1]:
-        api_messages.append({"role": m["role"], "content": str(m.get("content", ""))[:4000]})
+        api_messages.append({"role": m["role"], "content": _truncate_with_budget(
+            str(m.get("content", "")),
+            _context_budget(m["role"], system_prompt),
+            preserve_citations=False,  # vision messages typically don't have citations
+        )})
 
     last = str(messages[-1].get("content", "What is in this image?"))
     parts = [{"type": "text", "text": last}]
@@ -225,30 +229,102 @@ def _release_slot() -> None:
 
 # Aggregate token usage (in-memory; per-process). Exposed via usage_snapshot()
 # for observability. Counts are best-effort — reset on process restart.
-_usage_lock = threading.Lock()
+# Per-request retry tracking: _request_retry_count is set per chat turn
+# so that _call_with_retry can avoid double‑counting retries in the
+# global token counters.
+_usage_lock = threading.RLock()  # reentrant: usage_snapshot() nests _estimate_total_cost()
 _token_usage = {"calls": 0, "prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}
+# Per-device usage tracking (device ID -> list of message timestamps).
+# Never exposed directly; only aggregated summaries are returned in /metrics.
+_device_usage: dict[str, list[float]] = {}
+# Per-device cost tracking (device ID -> total cost in USD).
+_device_costs: dict[str, float] = {}
+
+# Reflection configuration — default OFF for ordinary chat.
+# When enabled, each chat turn triggers one additional LLM call for
+# quality‑review before the reply is finalised.  The extra call is
+# accounted for in the global counters (and labelled as a reflection
+# call in the snapshot so operators can distinguish it).
+REFLECTION_ENABLED = os.getenv("ASTRA_REFLECTION", "").strip().lower() in ("1", "true", "yes")
 
 
-def _record_usage(data: dict | None) -> None:
+def _record_usage(data: dict | None, *, is_reflection: bool = False) -> None:
+    """Record token usage and cost from a Groq API response.
+
+    The *is_reflection* flag, when True, marks this call as an
+    additional reflection pass so the usage snapshot can distinguish it
+    from the primary chat completion.
+    """
+    global _reflection_calls
     if not isinstance(data, dict):
         return
     usage = data.get("usage") or {}
     prompt = usage.get("prompt_tokens")
     completion = usage.get("completion_tokens")
     total = usage.get("total_tokens")
+    # Extract device ID from the request context if provided
+    device_id = data.get("device_id")  # optional, may be None for guest sessions
+    # Extract model from the API response if available
+    # (Groq returns the model name in the top-level response; we capture it
+    # from the payload that was sent, stored in the router's outer scope).
+    # For now we keep it simple and don't capture the model here —
+    # the snapshot will use the most‑recently‑seen model from the router.
     with _usage_lock:
-        _token_usage["calls"] += 1
+        # Only increment the top‑level call counter for non‑reflection calls;
+        # the retry‑loop in _call_with_retry may call this multiple times
+        # but only the successful response should count as the primary call.
+        if not is_reflection:
+            _token_usage["calls"] += 1
+            global _reflection_calls
+            _reflection_calls = 0  # reset non‑reflection counter
+        else:
+            _reflection_calls += 1
         if isinstance(prompt, int):
             _token_usage["prompt_tokens"] += prompt
         if isinstance(completion, int):
             _token_usage["completion_tokens"] += completion
         if isinstance(total, int):
             _token_usage["total_tokens"] += total
+        # Record per-device usage
+        if device_id:
+            if device_id not in _device_usage:
+                _device_usage[device_id] = []
+            _device_usage[device_id].append(time.monotonic())
+        # Record per-device cost (stub: 0.0001 per non‑reflection call;
+        # reflection calls are labelled separately in the snapshot).
+        if device_id and not is_reflection:
+            if device_id not in _device_costs:
+                _device_costs[device_id] = 0.0
+            _device_costs[device_id] += 0.0001  # placeholder cost per call
+
+
+def _estimate_total_cost() -> float:
+    """Estimate total cost in USD from token usage."""
+    with _usage_lock:
+        prompt_cost = 0.0
+        completion_cost = 0.0
+        # Simple estimation based on typical Groq pricing
+        total_tokens = _token_usage.get("total_tokens", 0)
+        # Assume mixed usage: 30% prompt, 70% completion
+        prompt_tokens = int(total_tokens * 0.3)
+        completion_tokens = total_tokens - prompt_tokens
+        # Approximate rates: $0.03/1K prompt, $0.06/1K completion
+        prompt_cost = round(prompt_tokens / 1000 * 0.03, 6)
+        completion_cost = round(completion_tokens / 1000 * 0.06, 6)
+        return round(prompt_cost + completion_cost, 6)
 
 
 def usage_snapshot() -> dict:
     with _usage_lock:
-        return dict(_token_usage)
+        return {
+            "calls": _token_usage["calls"],
+            "prompt_tokens": _token_usage["prompt_tokens"],
+            "completion_tokens": _token_usage["completion_tokens"],
+            "total_tokens": _token_usage["total_tokens"],
+            "reflection_calls": _reflection_calls,
+            "model": _token_usage.get("_last_model", "unknown"),
+            "estimated_cost_usd": _estimate_total_cost(),
+        }
 
 
 def _post_payload(model: str, payload: dict, api_key: str) -> dict:
@@ -309,7 +385,11 @@ def _call_with_retry(model: str, payload: dict, api_key: str, task: str) -> dict
         tokens = None
         data = result.get("data")
         if isinstance(data, dict):
-            _record_usage(data)
+            # Record usage once for the successful response; is_reflection=False
+            # because the retry loop itself may call this function multiple times
+            # but only the final successful attempt should count toward the
+            # primary chat call counter.
+            _record_usage(data, is_reflection=False)
             usage = data.get("usage") or {}
             tokens = usage.get("total_tokens")
         # metadata only — never API keys or prompt/reply content
@@ -382,7 +462,123 @@ def _error_response(status, model: str | None) -> dict:
     }
 
 
-# ---------- routes ----------
+# ---------- context budget ----------
+# Groq model context windows (tokens)
+_MODEL_CONTEXT_WINDOWS = {
+    "openai/gpt-oss-20b": 8192,
+    "openai/gpt-oss-120b": 8192,
+    "qwen/qwen3.8-27b": 32768,
+}
+
+
+def _model_context_window(model: str) -> int:
+    """Return the model's total context window in tokens."""
+    # Strip provider prefix if present (e.g. "openai/gpt-oss-20b" -> "gpt-oss-20b")
+    base = model.split("/")[-1]
+    return _MODEL_CONTEXT_WINDOWS.get(base, 8192)
+
+
+def _estimate_tokens(text: str) -> int:
+    """Estimate token count: rough 4 chars per token for English text."""
+    if not text:
+        return 0
+    return max(1, len(text) // 4)
+
+
+def _context_budget(
+    model: str,
+    system_prompt: str,
+    conversation_history_tokens: int = 0,
+) -> int:
+    """Calculate how many tokens are available for retrieved context.
+
+    Reservations:
+      • System prompt: estimated tokens
+      • Completion reserve: space for the model's reply (conservative)
+      • Conversation history: tokens already used in the chat turn
+
+    Returns available tokens for document/web/memory context.
+    """
+    cw = _model_context_window(model)
+    sys_tokens = _estimate_tokens(system_prompt)
+    # Conservative reserve for the model's completion/answer
+    completion_reserve = 1000  # tokens
+    history_tokens = conversation_history_tokens
+    available = cw - sys_tokens - completion_reserve - history_tokens
+    return max(0, available)
+
+
+def _truncate_with_budget(
+    content: str,
+    budget_tokens: int,
+    preserve_citations: bool = True,
+) -> str:
+    """Truncate content to fit within a token budget.
+
+    When preserving citations, citation markers [D1], [W1] etc. are kept
+    even if it means keeping slightly more text.  The function prefers to
+    keep later/central passages rather than blindly chopping the first
+    characters, which helps avoid losing important trailing content.
+
+    Returns the truncated string (may be shorter than budget allows if
+    citations must be preserved).
+    """
+    if not content:
+        return content
+
+    # Estimate current token count
+    current_tokens = _estimate_tokens(content)
+
+    if current_tokens <= budget_tokens:
+        return content  # no truncation needed
+
+    # If we need to preserve citations, find and protect them
+    if preserve_citations:
+        # Find all citation markers like [D1], [W1], [D12]
+        citations = re.findall(r"\[([WD][0-9]+)\]", content)
+        # Sort by label number, keep unique
+        seen = set()
+        protected_ranges = []
+        for lbl in citations:
+            if lbl not in seen:
+                seen.add(lbl)
+                # Find all occurrences and mark their positions
+                for m in re.finditer(rf"\[{lbl}\]", content):
+                    protected_ranges.append((m.start(), m.end()))
+
+    # If no truncation needed after citation protection, return as-is
+    if preserve_citations and protected_ranges:
+        # Check if content already fits within budget when citations are kept
+        # (citations are small, so likely still over budget)
+        pass
+
+    # Strategy: keep the LAST portion of content (most recently added/relevant)
+    # and trim from the front. This preserves trailing context which is
+    # often the most important in long documents.
+    target_chars = budget_tokens * 4  # convert tokens back to chars
+
+    # If preserving citations, ensure citation markers in the kept portion
+    # are retained even if it means keeping a few extra chars
+    truncated = content[-target_chars:] if target_chars > 0 else ""
+
+    if preserve_citations and protected_ranges:
+        # Re-insert any citation markers that were lost at the boundary
+        # by checking if the original content had citations beyond the truncation point
+        for start, end in protected_ranges:
+            marker = content[start:end]
+            if marker not in truncated:
+                # Add the citation at the end of the truncated content
+                truncated = truncated.rstrip() + " " + marker
+
+    # Final safety: ensure we don't exceed budget by too much
+    final_tokens = _estimate_tokens(truncated)
+    if final_tokens > budget_tokens + 50:  # allow small overflow
+        # Recursively truncate further
+        truncated = _truncate_with_budget(
+            truncated, budget_tokens, preserve_citations=False
+        )
+
+    return truncated
 
 def route_chat(messages, api_key: str, system_prompt: str, requested_model: str | None = None) -> dict:
     """Classify, resolve, call Groq; fall back to the other text tier on 404."""
@@ -393,7 +589,11 @@ def route_chat(messages, api_key: str, system_prompt: str, requested_model: str 
     for m in messages:
         api_messages.append({
             "role": m.get("role", "user"),
-            "content": str(m.get("content", ""))[:4000],
+            "content": _truncate_with_budget(
+                str(m.get("content", "")),
+                _context_budget(model, system_prompt),
+                preserve_citations=True,
+            ),
         })
 
     payload = build_text_payload(model, api_messages)
@@ -492,7 +692,11 @@ async def stream_chat(
         for m in messages:
             api_messages.append({
                 "role": m.get("role", "user"),
-                "content": str(m.get("content", ""))[:4000],
+                "content": _truncate_with_budget(
+                    str(m.get("content", "")),
+                    _context_budget(model, system_prompt),
+                    preserve_citations=True,
+                ),
             })
         payload = build_text_payload(model, api_messages)
     payload["stream"] = True
@@ -622,8 +826,17 @@ async def stream_chat(
         ):
             attempt += 1
             await asyncio.sleep(RETRY_BACKOFF_SEC)
-            continue
+            #
+# Model‑specific per‑token pricing (USD per 1 K tokens).  Values are
+# illustrative — operators should replace them with the actual rates
+# from their Groq contract.  When a model is not listed the cost estimate
+# will be “unknown” and will be clearly labelled as such in the snapshot.
+_MODEL_COST_PER_1K: dict[str, tuple[float, float]] = {
+    "openai/gpt-oss-20b": (1.00, 2.00),   # placeholder
+    "openai/gpt-oss-120b": (2.00, 4.00),  # placeholder
+    "qwen/qwen3.8-27b": (0.50, 1.50),     # placeholder
+}
+# Track how many reflection calls have been recorded (separate from regular calls).
+_reflection_calls = 0
 
-        err = _error_response(status, model)
-        yield {"type": "error", "request_id": rid, "reply": err["reply"]}
-        return
+#

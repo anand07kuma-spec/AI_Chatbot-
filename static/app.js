@@ -856,6 +856,126 @@
 
     // never keep recording in the background
     document.addEventListener('visibilitychange', () => {
+
+// ---------- Voice WebSocket Connection ----------
+let voiceWebSocket = null;
+let voiceConnected = false;
+let voiceDeviceId = "";
+
+function initVoiceWebSocket() {
+  // Get device_id from localStorage or generate one
+  const storedDeviceId = localStorage.getItem("astra_voice_device_id");
+  const urlParams = new URLSearchParams(window.location.search);
+  const paramDeviceId = urlParams.get("device_id");
+  voiceDeviceId = storedDeviceId || paramDeviceId || "def_dev_" + Date.now();
+
+  // Connect to the voice WebSocket
+  // Use wss:// for production, /ws/voice?device_id=XYZ for development
+  const isLocal = window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1";
+  const wsPath = isLocal
+    ? '/ws/voice?device_id=' + voiceDeviceId
+    : "wss://" + window.location.host + "/ws/voice?device_id=" + voiceDeviceId;
+
+  try {
+    voiceWebSocket = new WebSocket(wsPath);
+  } catch (e) {
+    setMicState("error");
+    showHint("WebSocket connection failed");
+    return;
+  }
+
+  voiceWebSocket.onopen = function(event) {
+    voiceConnected = true;
+    setMicState("idle");
+  };
+
+  voiceWebSocket.onmessage = function(event) {
+    try {
+      const data = JSON.parse(event.data);
+      handleVoiceMessage(data);
+    } catch (e) {
+      console.error("Failed to parse WebSocket message:", e);
+    }
+  };
+
+  voiceWebSocket.onerror = function(error) {
+    console.error("WebSocket error:", error);
+    setMicState("error");
+    showHint("WebSocket connection error");
+  };
+
+  voiceWebSocket.onclose = function(event) {
+    voiceConnected = false;
+    setMicState("idle");
+    // Attempt reconnect after a delay
+    setTimeout(initVoiceWebSocket, 3000);
+    showHint("Voice connection lost, reconnecting...");
+  };
+}
+
+function handleVoiceMessage(data) {
+  const type = data.type;
+
+  switch (type) {
+    case "welcome":
+      // Connection established, TTL and limits announced
+      setHint("Voice connection ready");
+      break;
+
+    case "rate_limit":
+      // Throttle sending - wait before sending more messages
+      setHint("Rate limit exceeded, waiting " + (data.retry_after || 5) + "s");
+      setMicState("idle");
+      break;
+
+    case "msg_too_large":
+      // Message exceeds size limit
+      setHint("Message too large, " + (data.limit || 1000) + " bytes max");
+      setMicState("idle");
+      break;
+
+    case "msg_received":
+      // Confirmation that message was received for STT
+      setHint("Message recorded");
+      break;
+
+    case "error":
+      setMicState("error");
+      setHint(data.error || "Voice service error");
+      break;
+
+    default:
+      // Unknown message type - ignore
+      break;
+  }
+}
+
+function sendVoiceMessage(rawData) {
+  if (!voiceWebSocket || voiceWebSocket.readyState !== WebSocket.OPEN) {
+    setMicState("error");
+    return;
+  }
+
+  // Never send if already recording or transcribing
+  if (busy || transcribing) return;
+
+  // Enforce max message size - rely on backend for authoritative enforcement
+  // but warn frontend to prevent unnecessary sends
+  if (rawData.length > 50000) {
+    setHint("Message too large, skipping");
+    setMicState("idle");
+    return;
+  }
+
+  voiceWebSocket.send(rawData);
+}
+
+// Initialize voice WebSocket on page load
+document.addEventListener("DOMContentLoaded", function() {
+  initVoiceInput();
+  initVoiceWebSocket();
+});
+
       if (document.hidden) stopListening();
     });
     window.addEventListener('pagehide', () => stopListening());

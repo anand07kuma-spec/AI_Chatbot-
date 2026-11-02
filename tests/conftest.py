@@ -15,6 +15,7 @@ os.environ["RATE_LIMIT_PER_MINUTE"] = "0"  # disable rate limiting for most test
 # Guest mode: never touch a real Supabase from the test suite — the in-memory
 # store backend has the same contract and is reset per test.
 os.environ["ASTRA_STORE"] = "memory"
+CONV = "conv-test-1234"  # conversation ID for streaming tests
 # RAG: force cheap local embeddings so tests never hit OpenAI even if a real
 # key is present in the developer's environment.
 os.environ["ASTRA_EMBEDDINGS_PROVIDER"] = "hash"

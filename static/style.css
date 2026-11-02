@@ -2640,3 +2640,81 @@ html[data-theme="light"] .tok-fn { color: #0b5fd0; }
   from { opacity: 0; transform: translateX(-50%) translateY(8px); }
   to { opacity: 1; transform: translateX(-50%) translateY(0); }
 }
+
+
+/* ── Premium Dark Purple Theme ───────────────────────────────────────── */
+--premium-bg: #0a0e17;
+--premium-panel: #111422;
+--premium-panel-2: #161c2e;
+--premium-glow: rgba(124, 108, 240, 0.18);
+--premium-accent: #7c6cf0;
+--premium-accent-2: #5bb8f5;
+--premium-gradient: linear-gradient(135deg, #7c6cf0 0%, #5bb8f5 100%);
+--premium-gradient-soft: linear-gradient(135deg, rgba(124,108,240,0.18) 0%, rgba(91,184,245,0.18) 100%);
+
+/* ── Glass morphism ──────────────────────────────────────────────────── */
+--glass-bg: rgba(12, 20, 34, 0.8);
+--glass-border: rgba(148, 163, 184, 0.18);
+
+/* ── New surface radii for premium look ──────────────────────────────── */
+--r-xl: 20px;
+--r-full: 16px;
+
+/* ── Enhanced shadows ─────────────────────────────────────────────────── */
+--shadow-premium: 0 4px 24px rgba(0,0,0,0.45);
+--shadow-premium-sm: 0 2px 10px rgba(0,0,0,0.35);
+--shadow-glass: 0 4px 20px rgba(0,0,0,0.4);
+
+/* ── Animation speeds ─────────────────────────────────────────────────── */
+--transition-fast: 150ms ease;
+--transition-normal: 250ms ease;
+--transition-slow: 350ms ease;
+
+
+/* ============================================================
+   PREMIUM POLISH — subtle visual enhancements (careful fix)
+   Targets existing classes only. No structural changes.
+   ============================================================ */
+
+/* Ambient purple glow bands behind the workspace (very subtle) */
+body::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 0;
+  background:
+    radial-gradient(58vw 48vh at 10% 0%, rgba(124, 108, 240, 0.10) 0%, transparent 62%),
+    radial-gradient(52vw 42vh at 92% 100%, rgba(91, 184, 245, 0.07) 0%, transparent 62%);
+}
+
+/* Keep app layers above the ambient glow */
+.shell { position: relative; z-index: 1; }
+
+/* Clean dark sidebar with a faint purple edge */
+.sidebar { border-right-color: rgba(124, 108, 240, 0.16); }
+
+/* Composer: premium dark surface with a purple focus glow */
+.composer:focus-within {
+  border-color: rgba(124, 108, 240, 0.55);
+  box-shadow: 0 0 0 1px rgba(124, 108, 240, 0.22), 0 10px 34px rgba(124, 108, 240, 0.10);
+}
+
+/* Send button: clearly visible Astra purple accent + soft glow */
+.send-btn {
+  box-shadow: 0 4px 14px rgba(124, 108, 240, 0.34);
+}
+.send-btn:hover:not(:disabled) {
+  box-shadow: 0 6px 20px rgba(124, 108, 240, 0.48);
+}
+.send-btn:disabled { box-shadow: none; }
+
+/* Quick-action chips: subtle purple accent on the icon tile */
+.sugg:hover .sugg-icon { background: rgba(124, 108, 240, 0.22); }
+
+/* Light theme: keep the ambient glow subtle */
+[data-theme="light"] body::before {
+  background:
+    radial-gradient(58vw 48vh at 10% 0%, rgba(91, 74, 224, 0.06) 0%, transparent 62%),
+    radial-gradient(52vw 42vh at 92% 100%, rgba(91, 74, 224, 0.04) 0%, transparent 62%);
+}

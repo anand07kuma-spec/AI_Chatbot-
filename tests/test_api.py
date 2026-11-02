@@ -1,4 +1,4 @@
-import base64
+﻿import base64
 import os
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -36,7 +36,7 @@ def test_security_headers(client):
 
 
 def test_static_cache_headers(client):
-    # stale JS/HTML mismatch breaks the UI after edits — always revalidate
+    # stale JS/HTML mismatch breaks the UI after edits â€�? always revalidate
     r = client.get("/static/style.css")
     assert r.status_code == 200
     assert "no-cache" in r.headers.get("cache-control", "")
@@ -349,7 +349,7 @@ def test_tts_upstream_failure_502(client):
 
 def test_tts_picks_hindi_voice(client):
     with patch.object(main, "_gemini_tts", new=AsyncMock(return_value=b"MP3")) as m:
-        client.post("/api/tts", json={"text": "नमस्ते दुनिया"})
+        client.post("/api/tts", json={"text": "à¤¨à¤®à¤¸à¥�?à¤¤à¥‡ à¤¦à¥�?à¤¨à¤¿à¤¯à¤¾"})
     assert m.call_args[0][1] == main.VOICE_HI
 
 
@@ -452,6 +452,10 @@ def test_rate_limit_kicks_in(client, monkeypatch):
 def test_rate_limit_uses_x_forwarded_for(monkeypatch):
     monkeypatch.setattr(main, "RATE_LIMIT_PER_MINUTE", 1)
     main._rate_limiter.reset()
+    # Monkeypatch the trusted-proxies env var so XFF is honoured in this test,
+    # and recompute the module-level _trusted_proxies set (import-time constant).
+    monkeypatch.setenv("TRUSTED_PROXIES", "10.0.0.1")
+    main._trusted_proxies = {p.strip() for p in os.getenv("TRUSTED_PROXIES", "").split(",") if p.strip()}
     from starlette.requests import Request
 
     scope = {
@@ -467,6 +471,8 @@ def test_rate_limit_uses_x_forwarded_for(monkeypatch):
     assert main._rate_limiter.allow("203.0.113.9", 1) is False
     assert main._rate_limiter.allow("198.51.100.7", 1) is True
     main._rate_limiter.reset()
+    # Reset the env var so other tests are not affected
+    monkeypatch.delenv("TRUSTED_PROXIES", raising=False)
 
 
 def test_body_limit_rejects_huge_content_length(client):

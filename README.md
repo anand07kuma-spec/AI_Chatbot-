@@ -63,28 +63,58 @@ render.yaml              Render deploy config
 
 ## Setup (local)
 
-```bash
+```powershell
 git clone <repository-url>
 cd AI_Chatbot
+# Create a virtual environment
 python -m venv .venv
-.venv\Scripts\activate        # Windows
-# source .venv/bin/activate   # macOS/Linux
+# Activate the virtual environment
+.\.venv\Scripts\activate
+# Install dependencies
 pip install -r requirements.txt
-copy .env.example .env        # Windows  (cp .env.example .env on macOS/Linux)
+# Copy the example environment file
+copy .env.example .env
 ```
 
 Edit `.env` — the only required key:
 
-```
-GROQ_API_KEY=your_groq_api_key_here     # https://console.groq.com
-GEMINI_API_KEY=your_gemini_api_key_here # TTS — https://aistudio.google.com/apikey
+```powershell
+# Copy from .env.example and uncomment (remove the '#') and paste your key
+# Get a key from https://console.groq.com  -> API Keys
+GROQ_API_KEY=your_groq_api_key_here
+
+# Optional: uncomment and fill in to enable
+# Voice OUTPUT (text-to-speech). Get one: https://aistudio.google.com/apikey
+# GEMINI_API_KEY=your_gemini_api_key_here
 ```
 
-Without `SUPABASE_URL` + `SUPABASE_SERVICE_ROLE_KEY` the app runs on the in-memory store (history lives only for the process lifetime).
+Without `SUPABASE_URL` + `SUPABASE_SERVICE_ROLE_KEY` the app runs on the in-memory store (history lives only per process restart).
 
 Run:
 
-```bash
+
+### Code Execution (Run Button)
+
+The editor includes a **Run** button for executing code snippets in an isolated sandbox.
+
+**Status**: Disabled until ASTRA_SANDBOX_URL is configured in the environment.
+
+When enabled, the Run button supports:
+- Language selection (Python, JavaScript, C, C++)
+- Code input with optional stdin
+- Safe execution via the backend /api/execute endpoint
+- Results displayed with successful/error states
+
+**Security**: Code is executed in an isolated sandbox (Piston-compatible). 
+Source code is untrusted and validated against an allowlist before execution.
+
+**To enable**: Set ASTRA_SANDBOX_URL in your environment to the sandbox service URL.
+
+`
+ASTRA_SANDBOX_URL=https://sandbox.example.com/api/v2/execute
+`
+
+```powershell
 uvicorn main:app --reload --port 8010
 ```
 
@@ -100,7 +130,7 @@ Open **http://127.0.0.1:8010**. For durable history, create the Supabase tables 
 | `GEMINI_TTS_VOICE` | `Kore` | Default Gemini voice (per-lang: `ASTRA_VOICE_EN/HI/UR`) |
 | `SUPABASE_URL` | unset | Supabase project URL (else in-memory store) |
 | `SUPABASE_SERVICE_ROLE_KEY` | unset | Server-side PostgREST auth (never sent to the browser) |
-| `SUPABASE_ANON_KEY` | unset | Anon key (read probes) |
+| `SUPABASE_ANON_KEY` | unset | Anon key (for browser read probes / future client use; not required for server-side store). |
 | `ASTRA_STORE` | auto | `supabase` \| `memory` force-override |
 | `TAVILY_API_KEY` | unset | Enables live web search |
 | `OPENAI_API_KEY` | unset | Real RAG embeddings (else local hash fallback) |
@@ -145,14 +175,14 @@ python -m pytest
 python -m pytest tests/ -v
 ```
 
-- 301 unit tests cover routing, streaming, search, RAG, device identity, guest history/memory APIs, voice, sandbox, UI-facing APIs, security headers, rate limiting, malformed/oversized input, log redaction, request ids, usage counters, the concurrency cap and frontend code-block rendering (the JS render test skips if `node` is not on PATH).
-- Tests force the in-memory store (`ASTRA_STORE=memory`) — no database or network needed.
+- Unit tests force the in-memory store (`ASTRA_STORE=memory`) — no database or network needed.
+- Test results vary by environment; typical run: ~300 of ~325 tests pass with MemoryStore fallback.
 
 **Integration tests** (real Groq/Tavily calls — opt-in, cost real quota):
 
 ```bash
 # Windows
-set ASTRA_INTEGRATION=1&& set GROQ_API_KEY=gsk_...&& python -m pytest tests/integration -m integration -v
+set ASTRA_INTEGRATION=1 && set GROQ_API_KEY=gsk_... && python -m pytest tests/integration -m integration -v
 # macOS/Linux
 ASTRA_INTEGRATION=1 GROQ_API_KEY=gsk_... python -m pytest tests/integration -m integration -v
 ```
@@ -272,3 +302,41 @@ This deployment configuration has **not** been live-verified from this machine �
 ## Author
 
 **Anand Kumar**
+
+
+### Voice WebSocket Connection
+
+The frontend connects to the `/ws/voice` WebSocket endpoint using the documented protocol.
+
+**Connection**:
+- Uses `wss://` for production, `/ws/voice?device_id=XYZ` for local development
+- `device_id` is obtained from `localStorage.astra_voice_device_id` or URL `?device_id` parameter
+- Connection states: `idle` -> `connecting` -> `listening` -> `processing` -> `speaking` -> `stopped`/`error`
+
+**Message Types** (server -> client):
+- `welcome`: Connection established with TTL and limits
+- `rate_limit`: Throttle sending - wait before sending more messages
+- `msg_too_large`: Message exceeds size limit
+- `msg_received`: Confirmation that message was received for STT
+- `error`: Voice service error
+
+**Frontend Responsibilities**:
+- Enforce reasonable recording limits for usability
+- Rely on backend for authoritative `STT_MAX_SECONDS`, payload-size and rate-limit enforcement
+- Release microphone tracks, audio contexts and WebSocket resources when voice mode stops
+- Prevent overlapping sessions and repeated message processing
+- Handle microphone permission denial gracefully
+- Attempt reconnection with exponential backoff on closure
+
+**UI States**:
+- **idle**: Microphone button ready, title "Speak your message"
+- **listening/recording**: Button shows "listening" class, timer active
+- **processing**: Backend processing the audio
+- **speaking**: TTS synthesis in progress
+- **error**: Microphone blocked or WebSocket error
+
+**Security**:
+- Never expose admin tokens or server credentials in browser code
+- Backend enforces all limits; frontend must not bypass them
+- `device_id` format validated server-side via `DEVICE_ID_RE`
+
