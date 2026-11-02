@@ -405,6 +405,19 @@ textarea:focus-visible {
   gap: 2px;
 }
 
+/* Sidebar branding */
+.side-brand {
+  padding: 2px 6px 10px;
+}
+
+.side-brand-logo {
+  width: 122px;
+  height: auto;
+  aspect-ratio: 3 / 2;
+  display: block;
+  border-radius: 10px;
+}
+
 .new-chat-btn {
   width: 100%;
   display: flex;
@@ -630,6 +643,16 @@ textarea:focus-visible {
   min-width: 0;
 }
 
+/* Official logo in the navbar — sized to sit inside the 52px topbar */
+.topbar-logo {
+  height: 32px;
+  width: auto;
+  aspect-ratio: 3 / 2;
+  flex-shrink: 0;
+  display: block;
+  border-radius: 8px;
+}
+
 .model-mode {
   appearance: none;
   -webkit-appearance: none;
@@ -681,7 +704,14 @@ textarea:focus-visible {
   animation: welcomeFade var(--dur-slow) var(--ease) both;
 }
 
+/* Official Astra AI logo (dark-background artwork; aspect ratio 3:2) */
 .welcome-logo {
+  width: 176px;
+  height: auto;
+  aspect-ratio: 3 / 2;
+  display: block;
+  margin: 0 auto;
+  border-radius: 14px;
   filter: drop-shadow(0 0 18px rgba(124, 108, 240, 0.25));
 }
 
@@ -2098,7 +2128,7 @@ html[data-theme="light"] .tok-fn { color: #0b5fd0; }
   .bubble-user { max-width: 88%; }
   .suggestions { grid-template-columns: 1fr; margin-top: var(--sp-6); }
   .empty-state { padding-top: 5vh; padding-left: var(--sp-4); padding-right: var(--sp-4); }
-  .welcome-logo { width: 44px; height: 44px; }
+  .welcome-logo { width: 132px; height: auto; }
   .welcome-sub { font-size: var(--fs-sm); }
   .messages { padding: var(--sp-5) var(--sp-4); }
 
@@ -2397,6 +2427,16 @@ html[data-theme="light"] .tok-fn { color: #0b5fd0; }
 /* ---------- Light theme: component-level overrides ---------- */
 [data-theme="light"] .topbar {
   background: rgba(255, 255, 255, 0.82);
+}
+
+/* Light theme: the dark-background logo sits in a clean dark container */
+[data-theme="light"] .topbar-logo,
+[data-theme="light"] .side-brand-logo,
+[data-theme="light"] .welcome-logo {
+  background-color: #0a0e1a;
+  padding: 4px;
+  border: 1px solid rgba(30, 41, 71, 0.22);
+  box-shadow: 0 2px 10px rgba(15, 23, 42, 0.16);
 }
 
 [data-theme="light"] .shell {

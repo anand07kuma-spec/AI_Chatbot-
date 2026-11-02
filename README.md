@@ -1,342 +1,147 @@
-﻿# Astra AI Chatbot
+﻿# Astra AI
 
-A production-minded AI assistant built with **Python**, **FastAPI** and **Groq** — streaming replies, smart model routing, live web search, document RAG, voice, vision, guest-mode chats with device-scoped history and user-controlled memory, and an optional code sandbox. Dark/light chat UI, no frontend framework, no build step.
+A FastAPI-based AI assistant with streaming replies, smart model routing, live web search, document RAG, voice and vision — with **no login**: chats are scoped to your browser device. The frontend is plain HTML/CSS/JS (no framework, no build step).
 
-## Features
+## Key Features
 
-- **Streaming replies (SSE)** — word-by-word output, Stop button, Regenerate, Retry on errors
-- **Smart model router** — Auto picks a fast model (`openai/gpt-oss-20b`) for simple chat and a reasoning model (`openai/gpt-oss-120b`) for complex/code questions; force Fast/Reasoning from the UI or send an explicit Groq model id via the API
-- **Live web search** (optional, Tavily) — time-sensitive questions get real sources with `[1]` citations; Auto/Always/Never toggle
-- **Document intelligence & RAG** — upload PDF/DOCX/TXT/MD/CSV/JSON/code per chat; answers from your documents with `[D1]` citations and page numbers
-- **Vision** — image understanding (`qwen/qwen3.8-27b`, max 3 images, 4MB each)
-- **Voice** — speech-to-text (Groq Whisper) and text-to-speech (Gemini TTS, WAV output), auto language detect
-- **Coding assistant** — auto-detected coding mode; optional isolated sandbox execution (Piston-compatible, disabled by default)
-- **Guest mode & memory** — no login/signup; chats sync per browser device (`X-Device-Id` header, localStorage id), persisted in Supabase with an in-memory fallback, consent-gated long-term memory, export/delete
-- **UI** — dark/light themes, settings modal, markdown/tables/syntax-highlighted code, accessibility (ARIA, focus-visible, keyboard nav), responsive
-- **Hardening** — rate limiting, body-size caps, security headers, X-Request-ID on every response, bounded retries, concurrency caps, pooled connections, secret-safe logs
+- **Streaming chat (SSE)** — word-by-word replies with Stop and Regenerate
+- **Smart model router** — Auto picks a fast model for simple chat and a reasoning model for complex/code questions; force Fast/Reasoning or an explicit model id via the API
+- **Live web search** (optional, Tavily) — time-sensitive answers with `[1]` source citations; Auto/Always/Never toggle
+- **Document RAG** — upload PDF/DOCX/TXT/MD/CSV/JSON/code per chat; answers cite `[D1]`-style sources
+- **Vision** — image understanding (max 3 images per request)
+- **Voice** — speech-to-text (Groq Whisper) and text-to-speech (Gemini TTS)
+- **Coding assistant** — coding mode auto-detected from your message; isolated sandbox execution available via API (disabled unless configured)
+- **Guest mode & memory** — device-scoped history and consent-gated long-term memory, stored in Supabase with an in-memory fallback
+- **UI** — dark/light themes, markdown/tables/syntax-highlighted code, responsive and accessible
+- **Hardening** — rate limiting, body-size caps, security headers, request IDs, bounded retries, pooled connections, secret-safe logs
 
-## Architecture
+## Tech Stack
 
-```
-Browser (static/index.html + app.js, vanilla JS)
-   │  SSE stream / JSON
-   ▼
-FastAPI (main.py)
-   ├─ middleware: request-id → static-cache → security-headers → body-limit → rate-limit → gzip
-   ├─ router.py       classify → resolve model → pooled Groq call → retry/fallback → usage counters
-   ├─ websearch.py    Tavily provider → TTL cache → rate limit → safe failure
-   ├─ rag.py          extract → chunk → embed → DocStore → retrieve → citations
-   ├─ execution.py    optional Piston sandbox client (HTTP, isolated)
-   ├─ device.py       X-Device-Id guest identity (validation, optional/required deps)
-   └─ store.py        Supabase (PostgREST via httpx) with thread-safe memory fallback
-```
+| Layer | Technology |
+|---|---|
+| Backend | Python 3.12+, FastAPI, uvicorn, httpx |
+| LLM / vision / STT | Groq API |
+| Web search | Tavily API (optional) |
+| Text-to-speech | Google Gemini TTS (optional) |
+| Embeddings | OpenAI API (optional; local hash fallback) |
+| Persistence | Supabase (PostgREST) or in-memory store |
+| Frontend | Vanilla HTML / CSS / JavaScript |
+| Tests | pytest |
 
-Key design rules:
-
-- **Streaming path** (`/api/chat/stream`) uses a per-event-loop pooled `httpx.AsyncClient` (keep-alive to Groq); **sync paths** (chat, search, embeddings) share one pooled `httpx.Client`. See `http_pool.py`.
-- **Every upstream call is bounded** — timeouts everywhere, transient-only retries (1 retry, short backoff), and a global concurrency cap (`ASTRA_MAX_CONCURRENT_UPSTREAM`, default 8) that returns a clear "busy" error instead of piling up sockets.
-- **Untrusted data is fenced** — web results and document chunks are injected into prompts as clearly-marked untrusted blocks; the UI renders only escaped markdown with an http(s)-only link allowlist.
-- **Never crashes a chat** — search/RAG/memory failures degrade to a normal reply with a safe notice.
-
-### Project layout
+## Project Structure
 
 ```
 main.py                  FastAPI app, routes, middleware
-router.py                model routing, retries, fallbacks, usage counters
-http_pool.py             shared pooled httpx clients
-websearch.py             Tavily search: policy, cache, citations
-rag.py                   documents: extract → chunk → embed → store → retrieve
-chatbot.py               chat facade (system prompts + router)
-execution.py             sandbox client (optional)
-device.py               guest identity (X-Device-Id header)
-store.py                Supabase PostgREST store + in-memory fallback
-memory.py               consent-gated memory (store-backed, device-scoped)
-voice.py                Gemini TTS voice selection
-routes_conversations.py chat history APIs (device-scoped CRUD/search/export)
-routes_memories.py      memory APIs (list/preferences/suggest/approve/delete)
+router.py                model routing, retries, usage counters
+chatbot.py               system prompts + chat facade
+websearch.py             search policy, cache, citations
+rag.py                   document extract → chunk → embed → retrieve
+store.py                 Supabase store + in-memory fallback
+memory.py                consent-gated, device-scoped memory
+device.py                guest identity (X-Device-Id header)
+execution.py             optional code-sandbox client
+voice.py                 TTS/STT helpers
+routes_conversations.py  chat history APIs
+routes_memories.py       memory APIs
 static/                  frontend (index.html, style.css, app.js)
-tests/                   unit suite (mocked externals)
-tests/integration/       live API tests (opt-in)
-scripts/measure_latency.py   latency bench
+tests/                   pytest suite (external calls mocked)
+supabase/schemas/        SQL schema + RLS
+scripts/                 env audit, latency benchmark
 render.yaml              Render deploy config
+.env.example             environment template (placeholders only)
 ```
 
-## Setup (local)
+## Installation
 
 ```powershell
-git clone <repository-url>
-cd AI_Chatbot
-# Create a virtual environment
+git clone https://github.com/anand07kuma-spec/AI_Chatbot-.git
+cd AI_Chatbot-
+
 python -m venv .venv
-# Activate the virtual environment
 .\.venv\Scripts\activate
-# Install dependencies
 pip install -r requirements.txt
-# Copy the example environment file
-copy .env.example .env
+
+Copy-Item .env.example .env
 ```
 
-Edit `.env` — the only required key:
+Then edit `.env` and add at least `GROQ_API_KEY` (from <https://console.groq.com>). Add the optional keys shown in `.env.example` only for the features you want. **Never commit `.env`** — it is gitignored.
+
+Without Supabase credentials the app runs on the in-memory store (history resets on restart).
+
+## Environment Variables
+
+| Variable | Purpose |
+|---|---|
+| `GROQ_API_KEY` | **Required** — chat, vision, speech-to-text |
+| `GEMINI_API_KEY` | Enables text-to-speech output |
+| `TAVILY_API_KEY` | Enables live web search |
+| `OPENAI_API_KEY` | Real RAG embeddings (otherwise local hash fallback) |
+| `SUPABASE_URL` / `SUPABASE_SERVICE_ROLE_KEY` | Durable history/memory (server-side only) |
+| `ASTRA_STORE` | Force `supabase` or `memory` storage backend |
+| `ASTRA_FAST_MODEL` / `ASTRA_REASONING_MODEL` | Fast-tier / reasoning-tier model ids |
+| `ASTRA_VISION_MODEL` / `ASTRA_STT_MODEL` | Image and speech-to-text model ids |
+| `ASTRA_ROUTER_MODE` | `auto` \| `fast` \| `reasoning` |
+| `ASTRA_SANDBOX_URL` / `ASTRA_SANDBOX_KEY` | Piston-compatible code sandbox (optional) |
+| `ASTRA_MAX_CONCURRENT_UPSTREAM` | Global cap on simultaneous model calls |
+| `ASTRA_MODEL_TIMEOUT` / `ASTRA_STREAM_IDLE_TIMEOUT` | Upstream and stream idle timeouts (seconds) |
+| `RATE_LIMIT_PER_MINUTE` | Per-IP API limit (`0` disables) |
+| `ALLOWED_ORIGINS` | CORS origins (unset = same-origin only) |
+| `GEMINI_TTS_MODEL` / `GEMINI_TTS_VOICE` | TTS model and default voice |
+
+`.env.example` is the configuration template with placeholders and comments. Secrets are read from environment variables only — never committed, logged, or sent to the browser.
+
+## Run Locally
 
 ```powershell
-# Copy from .env.example and uncomment (remove the '#') and paste your key
-# Get a key from https://console.groq.com  -> API Keys
-GROQ_API_KEY=your_groq_api_key_here
-
-# Optional: uncomment and fill in to enable
-# Voice OUTPUT (text-to-speech). Get one: https://aistudio.google.com/apikey
-# GEMINI_API_KEY=your_gemini_api_key_here
-```
-
-Without `SUPABASE_URL` + `SUPABASE_SERVICE_ROLE_KEY` the app runs on the in-memory store (history lives only per process restart).
-
-Run:
-
-
-### Code Execution (Run Button)
-
-The editor includes a **Run** button for executing code snippets in an isolated sandbox.
-
-**Status**: Disabled until ASTRA_SANDBOX_URL is configured in the environment.
-
-When enabled, the Run button supports:
-- Language selection (Python, JavaScript, C, C++)
-- Code input with optional stdin
-- Safe execution via the backend /api/execute endpoint
-- Results displayed with successful/error states
-
-**Security**: Code is executed in an isolated sandbox (Piston-compatible). 
-Source code is untrusted and validated against an allowlist before execution.
-
-**To enable**: Set ASTRA_SANDBOX_URL in your environment to the sandbox service URL.
-
-`
-ASTRA_SANDBOX_URL=https://sandbox.example.com/api/v2/execute
-`
-
-```powershell
+.\.venv\Scripts\activate
 uvicorn main:app --reload --port 8010
 ```
 
-Open **http://127.0.0.1:8010**. For durable history, create the Supabase tables once via the SQL Editor (see `Supabase setup` below).
+Open <http://127.0.0.1:8010>.
 
-## Configuration
+If activation is blocked by execution policy, run directly:
 
-| Variable | Default | Purpose |
-|---|---|---|
-| `GROQ_API_KEY` | — (required) | Chat / vision / STT provider key |
-| `GEMINI_API_KEY` | unset (TTS disabled) | Gemini text-to-speech |
-| `GEMINI_TTS_MODEL` | `gemini-2.5-flash-preview-tts` | TTS model id |
-| `GEMINI_TTS_VOICE` | `Kore` | Default Gemini voice (per-lang: `ASTRA_VOICE_EN/HI/UR`) |
-| `SUPABASE_URL` | unset | Supabase project URL (else in-memory store) |
-| `SUPABASE_SERVICE_ROLE_KEY` | unset | Server-side PostgREST auth (never sent to the browser) |
-| `SUPABASE_ANON_KEY` | unset | Anon key (for browser read probes / future client use; not required for server-side store). |
-| `ASTRA_STORE` | auto | `supabase` \| `memory` force-override |
-| `TAVILY_API_KEY` | unset | Enables live web search |
-| `OPENAI_API_KEY` | unset | Real RAG embeddings (else local hash fallback) |
-| `GROQ_MODEL` / `ASTRA_REASONING_MODEL` | `openai/gpt-oss-120b` | Reasoning-tier model |
-| `ASTRA_FAST_MODEL` | `openai/gpt-oss-20b` | Fast-tier model |
-| `ASTRA_VISION_MODEL` | `qwen/qwen3.8-27b` | Image understanding |
-| `ASTRA_STT_MODEL` | `whisper-large-v3-turbo` | Speech-to-text |
-| `ASTRA_ROUTER_MODE` | `auto` | `auto` \| `fast` \| `reasoning` |
-| `ASTRA_MODEL_TIMEOUT` | `60` | Seconds per provider call |
-| `ASTRA_STREAM_IDLE_TIMEOUT` | `30` | Max silent seconds between stream chunks |
-| `ASTRA_MAX_CONCURRENT_UPSTREAM` | `8` | Global cap on simultaneous model calls |
-| `ASTRA_EMBEDDINGS_PROVIDER` | `auto` | `auto` \| `openai` \| `hash` |
-| `ASTRA_SEARCH_*` | see `websearch.py` | Search timeout / cache TTL / max results |
-| `ASTRA_SANDBOX_URL` / `ASTRA_SANDBOX_KEY` | unset | Piston-compatible code sandbox (optional) |
-| `RATE_LIMIT_PER_MINUTE` | `30` | Per-IP API limit (`0` disables) |
-| `ALLOWED_ORIGINS` | unset | CORS origins (disabled = same-origin only) |
+```powershell
+.\.venv\Scripts\python.exe -m uvicorn main:app --reload --port 8010
+```
 
-Secrets are read from environment variables only — never committed, never sent to the frontend, never logged.
+There is also a helper script: `.\start_server.bat`.
 
-## API overview
+For durable history, create the Supabase tables once by running `supabase/schemas/001_create_tables.sql` in the Supabase SQL Editor.
+
+## API Endpoints
 
 | Endpoint | Purpose |
 |---|---|
 | `GET /health` | Liveness + token-usage counters |
 | `GET /api/models` | Resolved model modes for this deployment |
 | `POST /api/chat` | JSON chat (routing, search, RAG, memory) |
-| `POST /api/chat/stream` | SSE streaming chat (same body; optional `web_search`, `conversation_id`, `doc_ids`, `reply_lang`, `mode`) |
-| `POST /api/tts` · `POST /api/transcribe` | Voice synthesis / speech-to-text |
-| `GET /api/sandbox` · `POST /api/execute` | Sandbox status / code execution |
-| `POST /api/docs` · `GET` · `DELETE /api/docs/{id}` | Document upload / list / remove |
-| `/api/conversations/*` · `/api/memories/*` | Device-scoped chat history, memory (send `X-Device-Id`; `GET /api/memories/preferences` for the toggle) |
+| `POST /api/chat/stream` | SSE streaming chat — events: `[docs?] [search*] → meta → delta* → (done \| error)` |
+| `POST /api/docs` · `GET /api/docs` · `DELETE /api/docs/{id}` | Document upload / list / remove |
+| `POST /api/tts` · `POST /api/transcribe` | Text-to-speech / speech-to-text |
+| `GET /api/conversations/*` · `GET/DELETE /api/memories/*` | Device-scoped history and memory (send `X-Device-Id`) |
+| `GET /api/sandbox` · `POST /api/execute` | Sandbox status / code execution (503 until configured) |
+| `WS /ws/voice` | Voice session (rate-limited, device-scoped) |
 
-SSE event order: `[docs?] [search*] → meta → delta* → (done | error)`, with `memory` events (suggestions) on streams. Every stream and every response carries an `X-Request-ID` for log correlation. Identity: the browser generates a random device id (localStorage `astra_device_id`, regex-validated) and sends it as `X-Device-Id`; all history/memory queries are scoped to it.
+Identity: the browser stores a random device id in `localStorage` and sends it as `X-Device-Id`; all history/memory queries are scoped to it. Every response carries `X-Request-ID` for log correlation.
 
 ## Testing
 
-```bash
-# Unit suite — all external AI calls mocked; no keys or network needed
+```powershell
+.\.venv\Scripts\activate
 python -m pytest
-
-# Verbose
-python -m pytest tests/ -v
 ```
 
-- Unit tests force the in-memory store (`ASTRA_STORE=memory`) — no database or network needed.
-- Test results vary by environment; typical run: ~300 of ~325 tests pass with MemoryStore fallback.
+- Unit tests mock all external AI calls and force the in-memory store — no keys, network, or database needed.
+- Integration tests (real API calls, cost quota) are deselected by default; run them explicitly with:
+  `python -m pytest tests/integration -m integration -v`
+- Latency benchmark (needs a running server): `python scripts/measure_latency.py`
 
-**Integration tests** (real Groq/Tavily calls — opt-in, cost real quota):
+## Security Note
 
-```bash
-# Windows
-set ASTRA_INTEGRATION=1 && set GROQ_API_KEY=gsk_... && python -m pytest tests/integration -m integration -v
-# macOS/Linux
-ASTRA_INTEGRATION=1 GROQ_API_KEY=gsk_... python -m pytest tests/integration -m integration -v
-```
-
-They are **deselected by default** (`pytest.ini`) so `pytest` never hits the network or spends your quota by accident.
-
-**Latency bench** (real model calls; run against a local server):
-
-```bash
-uvicorn main:app --port 8010    # in one shell
-python scripts/measure_latency.py
-```
-
-## Performance
-
-Measured locally (Windows, Python 3.14, real Groq calls, n=5 chat / n=20 static; before/after Phase 9 pooling):
-
-| Endpoint | p50 (before) | p50 (after) | Notes |
-|---|---|---|---|
-| `GET /health` | 5.2 ms | 6.1 ms | noise-level |
-| `GET /` | 4.8 ms | 5.6 ms | noise-level |
-| `GET /api/models` | 2.3 ms | 4.6 ms | noise-level |
-| `POST /api/chat` (real) | 757 ms | 677 ms | dominated by Groq model latency |
-| stream TTFT (real) | 691 ms | 349 ms (min) | keep-alive reuse helps repeat calls |
-
-Honest caveats: n=5 real-model samples have high variance (one slow upstream call moves p95 by seconds); the structural wins are connection reuse (no repeated TCP+TLS handshake to Groq/Tavily/OpenAI), bounded concurrency (a burst cannot open unbounded sockets), and transient-only retries (1 retry, 0.3s backoff — never retries 4xx or "busy"). Token usage is counted in-process and exposed at `/health` (`calls`, `prompt_tokens`, `completion_tokens`, `total_tokens`).
-
-## Supabase setup (one-time)
-
-The server persists guest history/memory in Supabase via PostgREST (service-role key, server-side only). Run this once in **Supabase → SQL Editor** (safe to re-run):
-
-```sql
-create table if not exists devices (
-  device_id text primary key,
-  memory_enabled boolean not null default true,
-  created_at timestamptz not null default now()
-);
-
-create table if not exists conversations (
-  id text primary key,
-  device_id text not null references devices(device_id) on delete cascade,
-  title text not null default '',
-  created_at timestamptz not null,
-  updated_at timestamptz not null
-);
-create index if not exists conversations_device_idx on conversations (device_id, updated_at desc);
-
-create table if not exists messages (
-  id text primary key,
-  conversation_id text not null references conversations(id) on delete cascade,
-  role text not null,
-  content text not null,
-  created_at timestamptz not null
-);
-create index if not exists messages_conv_idx on messages (conversation_id, created_at);
-
-create table if not exists memories (
-  id text primary key,
-  device_id text not null references devices(device_id) on delete cascade,
-  content text not null,
-  kind text not null default 'fact',
-  status text not null default 'active',
-  created_at timestamptz not null,
-  updated_at timestamptz not null
-);
-create index if not exists memories_device_idx on memories (device_id, status);
-
-alter table devices enable row level security;
-alter table conversations enable row level security;
-alter table messages enable row level security;
-alter table memories enable row level security;
-```
-
-RLS stays enabled with **no policies**: the browser never talks to Supabase directly — only the server does, with the service-role key (which bypasses RLS), and every query is already scoped by `device_id` in application code.
-
-## Deployment (Render)
-
-`render.yaml` is ready: Python pinned via `PYTHON_VERSION`, `uvicorn main:app --host 0.0.0.0 --port $PORT`, `/health` health check, no migration step (schema lives in the SQL above).
-
-1. Push the repo to GitHub.
-2. [render.com](https://render.com) → **New +** → **Web Service** → connect the repo (Render reads `render.yaml` automatically).
-3. Create the Supabase tables once (SQL above) if not already done.
-4. Set environment variables (all secrets `sync: false` in `render.yaml` — set them in the Render dashboard):
-   - `GROQ_API_KEY` (required, Secret)
-   - `GEMINI_API_KEY` (Secret — enables TTS)
-   - `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`, `SUPABASE_ANON_KEY` (Secrets)
-   - `TAVILY_API_KEY`, `OPENAI_API_KEY` (optional, Secret)
-5. Deploy → public URL like `https://astra-ai-chatbot.onrender.com`.
-
-**Operational notes:**
-
-- **No local DB** — without Supabase keys the app serves from the in-memory store (wiped per restart/redeploy); with Supabase, history is durable. In-process caches (TTS clips, search cache, RAG DocStore) reset per deploy — by design.
-- **Rollback** — Render keeps deploy history; roll back from the dashboard (previous image).
-- **Logs** — request-id correlated, secret-free; tail from the Render dashboard.
-
-This deployment configuration has **not** been live-verified from this machine — the app is verified locally (301 tests + live smoke + Playwright E2E + latency bench); Render behaviour is inferred from `render.yaml` and Render's documented Python/runtime behaviour.
-
-## Security
-
-- **Secrets**: env vars only; `.env` gitignored; keys never logged (verified by a redaction test), never sent to the client, never in frontend JS.
-- **Identity without accounts**: there is no login and no user table — the browser generates a random device id (validated regex `^[A-Za-z0-9_-]{8,64}$`, 400 on malformed), every history/memory query is scoped to it, and other devices' rows are unreachable. The service-role key never leaves the server; RLS is enabled on all tables as defence in depth.
-- **Transport hygiene**: security headers (nosniff, DENY framing, no-referrer), optional CORS locked to `ALLOWED_ORIGINS`, GZip for large bodies.
-- **Abuse controls**: per-IP rate limit, 30MB body cap, image MIME/size/count validation, upstream concurrency cap, request-id correlated logs.
-- **Prompt fencing**: web results and documents enter prompts as untrusted, clearly-marked blocks; the UI escapes all model output and allows only http(s) links.
-- **Data control**: per-device export (markdown) and delete of single/all conversations and memories; memory is consent-gated — nothing is injected without approval.
-- **Dependencies**: all pinned with `==`; `pip-audit` against `requirements.txt` reports **no known vulnerabilities** (Oct 2026).
-
-## Limitations
-
-- RAG DocStore is in-process (24h TTL, wiped on redeploy) — fine for the free tier, not a multi-instance database; pluggable for a later pgvector backend.
-- No OCR — scanned/image-only PDFs are detected and reported, not parsed.
-- Hash embeddings (no `OPENAI_API_KEY`) give keyword-adjacent retrieval only.
-- Memory extractor is a deliberate lightweight heuristic — it suggests less rather than more; nothing is remembered without user approval.
-- Code execution requires an external Piston-compatible sandbox (`ASTRA_SANDBOX_URL`); without it, the coding assistant works but cannot run code.
-- Groq does not expose per-token pricing — token counts are tracked; cost math is left to your billing dashboard.
-
-## Author
-
-**Anand Kumar**
-
-
-### Voice WebSocket Connection
-
-The frontend connects to the `/ws/voice` WebSocket endpoint using the documented protocol.
-
-**Connection**:
-- Uses `wss://` for production, `/ws/voice?device_id=XYZ` for local development
-- `device_id` is obtained from `localStorage.astra_voice_device_id` or URL `?device_id` parameter
-- Connection states: `idle` -> `connecting` -> `listening` -> `processing` -> `speaking` -> `stopped`/`error`
-
-**Message Types** (server -> client):
-- `welcome`: Connection established with TTL and limits
-- `rate_limit`: Throttle sending - wait before sending more messages
-- `msg_too_large`: Message exceeds size limit
-- `msg_received`: Confirmation that message was received for STT
-- `error`: Voice service error
-
-**Frontend Responsibilities**:
-- Enforce reasonable recording limits for usability
-- Rely on backend for authoritative `STT_MAX_SECONDS`, payload-size and rate-limit enforcement
-- Release microphone tracks, audio contexts and WebSocket resources when voice mode stops
-- Prevent overlapping sessions and repeated message processing
-- Handle microphone permission denial gracefully
-- Attempt reconnection with exponential backoff on closure
-
-**UI States**:
-- **idle**: Microphone button ready, title "Speak your message"
-- **listening/recording**: Button shows "listening" class, timer active
-- **processing**: Backend processing the audio
-- **speaking**: TTS synthesis in progress
-- **error**: Microphone blocked or WebSocket error
-
-**Security**:
-- Never expose admin tokens or server credentials in browser code
-- Backend enforces all limits; frontend must not bypass them
-- `device_id` format validated server-side via `DEVICE_ID_RE`
-
+- **Secrets**: environment variables only; `.env` is gitignored; keys are never logged, never sent to the client, and never appear in frontend JS.
+- **No accounts, no user table**: a regex-validated random device id identifies each browser; every history/memory query is scoped to it, so other devices' rows are unreachable. The Supabase service-role key never leaves the server.
+- **Transport hygiene**: security headers (nosniff, DENY framing, no-referrer), optional CORS allowlist, gzip for large bodies.
+- **Abuse controls**: per-IP rate limit, body-size cap, image validation, upstream concurrency cap.
+- **Prompt fencing**: web results and documents enter prompts as clearly-marked untrusted blocks; the UI escapes model output and allows only http(s) links.
+- **Data control**: per-device export and delete for conversations and memories; memory is consent-gated — nothing is injected without approval.

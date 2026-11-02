@@ -1,10 +1,18 @@
-﻿﻿<!DOCTYPE html>
+﻿<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
 <meta name="theme-color" content="#0b1020" />
-<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>✦</text></svg>" />
+<link rel="icon" type="image/png" sizes="32x32" href="/static/brand/favicon-32.png" />
+<link rel="icon" type="image/png" sizes="48x48" href="/static/brand/favicon-48.png" />
+<link rel="icon" type="image/png" sizes="16x16" href="/static/brand/favicon-16.png" />
+<link rel="apple-touch-icon" sizes="180x180" href="/static/brand/apple-touch-icon.png" />
+<link rel="manifest" href="/static/manifest.json" />
+<meta name="apple-mobile-web-app-capable" content="yes" />
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+<meta name="apple-mobile-web-app-title" content="Astra AI" />
+<meta name="description" content="Astra AI assistant - streaming chat, web search, documents, voice and vision." />
 <title>Astra AI | Chatbot</title>
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
@@ -33,6 +41,9 @@
 
 <aside id="sidebar" class="sidebar">
   <div class="side-top">
+    <div class="side-brand">
+      <img class="side-brand-logo" src="/static/brand/astra-ai-logo.png" alt="Astra AI" width="640" height="426" />
+    </div>
     <button id="newChatBtn" class="new-chat-btn" aria-label="New chat">
       <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
       New chat
@@ -61,7 +72,7 @@
     <button id="menuBtn" class="icon-btn" title="Toggle sidebar" aria-label="Toggle sidebar">
       <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M3 6h18M3 12h18M3 18h18"/></svg>
     </button>
-    <div class="topbar-title">Astra AI</div>
+    <div class="topbar-title"><img class="topbar-logo" src="/static/brand/astra-ai-logo.png" alt="" aria-hidden="true" width="640" height="426" />Astra AI</div>
     <div class="topbar-modes">
       <button id="themeToggleBtn" class="icon-btn theme-toggle" title="Toggle theme (dark / light)" aria-label="Toggle theme">
         <svg class="theme-icon-dark" width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
@@ -76,16 +87,7 @@
   <main id="scrollArea" class="scroll-area">
     <div id="emptyState" class="empty-state">
       <div class="welcome-brand" aria-hidden="true">
-        <svg class="welcome-logo" width="52" height="52" viewBox="0 0 48 48" fill="none" xmlns="http://www.w3.org/2000/svg">
-          <defs>
-            <linearGradient id="wg" x1="0" y1="0" x2="48" y2="48">
-              <stop offset="0%" stop-color="#7c6cf0"/>
-              <stop offset="100%" stop-color="#5bb8f5"/>
-            </linearGradient>
-          </defs>
-          <rect width="48" height="48" rx="14" fill="url(#wg)" opacity="0.12"/>
-          <path d="M24 8 L28.5 19.5 L40 24 L28.5 28.5 L24 40 L19.5 28.5 L8 24 L19.5 19.5 Z" fill="url(#wg)"/>
-        </svg>
+        <img class="welcome-logo" src="/static/brand/astra-ai-logo.png" alt="" width="640" height="426" />
       </div>
       <div class="greet">What can we explore today?</div>
       <p class="welcome-sub">I can help you learn, code, write, research and reason through complex problems.</p>
